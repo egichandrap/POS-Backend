@@ -3,9 +3,11 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/example/jwt-ddd-clean/internal/domain/model"
 	"github.com/example/jwt-ddd-clean/internal/domain/repository"
 )
@@ -29,23 +31,19 @@ func (r *PostgresInventoryRepository) Create(ctx context.Context, inventory *mod
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
 
-	now := time.Now()
-	inventory.CreatedAt = now
-	inventory.UpdatedAt = now
-
 	_, err := r.db.ExecContext(ctx, query,
-		inventory.ID,
-		inventory.SKU,
-		inventory.Name,
-		inventory.Description,
-		inventory.Quantity,
-		inventory.Unit,
-		inventory.Location,
-		inventory.MinStock,
-		inventory.MaxStock,
-		inventory.Price,
-		inventory.CreatedAt,
-		inventory.UpdatedAt,
+		inventory.ID(),
+		inventory.SKU(),
+		inventory.Name(),
+		inventory.Description(),
+		inventory.Quantity(),
+		inventory.Unit(),
+		inventory.Location(),
+		inventory.MinStock(),
+		inventory.MaxStock(),
+		inventory.Price(),
+		inventory.CreatedAt(),
+		inventory.UpdatedAt(),
 	)
 
 	return err
@@ -59,20 +57,14 @@ func (r *PostgresInventoryRepository) GetByID(ctx context.Context, id string) (*
 		WHERE id = $1
 	`
 
-	inv := &model.Inventory{}
+	var invID, sku, name, description, unit, location string
+	var quantity, minStock, maxStock int
+	var price float64
+	var createdAt, updatedAt time.Time
+
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&inv.ID,
-		&inv.SKU,
-		&inv.Name,
-		&inv.Description,
-		&inv.Quantity,
-		&inv.Unit,
-		&inv.Location,
-		&inv.MinStock,
-		&inv.MaxStock,
-		&inv.Price,
-		&inv.CreatedAt,
-		&inv.UpdatedAt,
+		&invID, &sku, &name, &description, &quantity, &unit, &location,
+		&minStock, &maxStock, &price, &createdAt, &updatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -82,7 +74,7 @@ func (r *PostgresInventoryRepository) GetByID(ctx context.Context, id string) (*
 		return nil, err
 	}
 
-	return inv, nil
+	return model.ReconstructInventory(invID, sku, name, description, quantity, unit, location, minStock, maxStock, price, createdAt, updatedAt), nil
 }
 
 // GetBySKU retrieves an inventory item by its SKU
@@ -93,20 +85,14 @@ func (r *PostgresInventoryRepository) GetBySKU(ctx context.Context, sku string) 
 		WHERE sku = $1
 	`
 
-	inv := &model.Inventory{}
+	var invID, skuVal, name, description, unit, location string
+	var quantity, minStock, maxStock int
+	var price float64
+	var createdAt, updatedAt time.Time
+
 	err := r.db.QueryRowContext(ctx, query, sku).Scan(
-		&inv.ID,
-		&inv.SKU,
-		&inv.Name,
-		&inv.Description,
-		&inv.Quantity,
-		&inv.Unit,
-		&inv.Location,
-		&inv.MinStock,
-		&inv.MaxStock,
-		&inv.Price,
-		&inv.CreatedAt,
-		&inv.UpdatedAt,
+		&invID, &skuVal, &name, &description, &quantity, &unit, &location,
+		&minStock, &maxStock, &price, &createdAt, &updatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -116,7 +102,7 @@ func (r *PostgresInventoryRepository) GetBySKU(ctx context.Context, sku string) 
 		return nil, err
 	}
 
-	return inv, nil
+	return model.ReconstructInventory(invID, skuVal, name, description, quantity, unit, location, minStock, maxStock, price, createdAt, updatedAt), nil
 }
 
 // Update updates an existing inventory item
@@ -127,20 +113,18 @@ func (r *PostgresInventoryRepository) Update(ctx context.Context, inventory *mod
 		WHERE id = $11
 	`
 
-	inventory.UpdatedAt = time.Now()
-
 	_, err := r.db.ExecContext(ctx, query,
-		inventory.SKU,
-		inventory.Name,
-		inventory.Description,
-		inventory.Quantity,
-		inventory.Unit,
-		inventory.Location,
-		inventory.MinStock,
-		inventory.MaxStock,
-		inventory.Price,
-		inventory.UpdatedAt,
-		inventory.ID,
+		inventory.SKU(),
+		inventory.Name(),
+		inventory.Description(),
+		inventory.Quantity(),
+		inventory.Unit(),
+		inventory.Location(),
+		inventory.MinStock(),
+		inventory.MaxStock(),
+		inventory.Price(),
+		inventory.UpdatedAt(),
+		inventory.ID(),
 	)
 
 	return err
@@ -154,7 +138,7 @@ func (r *PostgresInventoryRepository) Delete(ctx context.Context, id string) err
 }
 
 // List retrieves a list of inventory items with optional filtering
-func (r *PostgresInventoryRepository) List(ctx context.Context, filter *model.InventoryFilter) ([]*model.Inventory, error) {
+func (r *PostgresInventoryRepository) List(ctx context.Context, filter *repository.InventoryFilter) ([]*model.Inventory, error) {
 	query := `
 		SELECT id, sku, name, description, quantity, unit, location, min_stock, max_stock, price, created_at, updated_at
 		FROM inventories
@@ -166,27 +150,27 @@ func (r *PostgresInventoryRepository) List(ctx context.Context, filter *model.In
 
 	if filter != nil {
 		if filter.SKU != nil {
-			query += " AND sku LIKE $" + string(rune('0'+argCount))
+			query += fmt.Sprintf(" AND sku LIKE $%d", argCount)
 			args = append(args, "%"+*filter.SKU+"%")
 			argCount++
 		}
 		if filter.Name != nil {
-			query += " AND name LIKE $" + string(rune('0'+argCount))
+			query += fmt.Sprintf(" AND name LIKE $%d", argCount)
 			args = append(args, "%"+*filter.Name+"%")
 			argCount++
 		}
 		if filter.Location != nil {
-			query += " AND location = $" + string(rune('0'+argCount))
+			query += fmt.Sprintf(" AND location = $%d", argCount)
 			args = append(args, *filter.Location)
 			argCount++
 		}
 		if filter.MinQty != nil {
-			query += " AND quantity >= $" + string(rune('0'+argCount))
+			query += fmt.Sprintf(" AND quantity >= $%d", argCount)
 			args = append(args, *filter.MinQty)
 			argCount++
 		}
 		if filter.MaxQty != nil {
-			query += " AND quantity <= $" + string(rune('0'+argCount))
+			query += fmt.Sprintf(" AND quantity <= $%d", argCount)
 			args = append(args, *filter.MaxQty)
 			argCount++
 		}
@@ -195,12 +179,12 @@ func (r *PostgresInventoryRepository) List(ctx context.Context, filter *model.In
 	query += " ORDER BY created_at DESC"
 
 	if filter != nil && filter.Limit > 0 {
-		query += " LIMIT $" + string(rune('0'+argCount))
+		query += fmt.Sprintf(" LIMIT $%d", argCount)
 		args = append(args, filter.Limit)
 		argCount++
 
 		if filter.Offset > 0 {
-			query += " OFFSET $" + string(rune('0'+argCount))
+			query += fmt.Sprintf(" OFFSET $%d", argCount)
 			args = append(args, filter.Offset)
 		}
 	}
@@ -213,32 +197,24 @@ func (r *PostgresInventoryRepository) List(ctx context.Context, filter *model.In
 
 	var inventories []*model.Inventory
 	for rows.Next() {
-		inv := &model.Inventory{}
-		err := rows.Scan(
-			&inv.ID,
-			&inv.SKU,
-			&inv.Name,
-			&inv.Description,
-			&inv.Quantity,
-			&inv.Unit,
-			&inv.Location,
-			&inv.MinStock,
-			&inv.MaxStock,
-			&inv.Price,
-			&inv.CreatedAt,
-			&inv.UpdatedAt,
-		)
+		var invID, sku, name, description, unit, location string
+		var quantity, minStock, maxStock int
+		var price float64
+		var createdAt, updatedAt time.Time
+
+		err := rows.Scan(&invID, &sku, &name, &description, &quantity, &unit, &location,
+			&minStock, &maxStock, &price, &createdAt, &updatedAt)
 		if err != nil {
 			return nil, err
 		}
-		inventories = append(inventories, inv)
+		inventories = append(inventories, model.ReconstructInventory(invID, sku, name, description, quantity, unit, location, minStock, maxStock, price, createdAt, updatedAt))
 	}
 
 	return inventories, rows.Err()
 }
 
 // Count returns the total count of inventory items
-func (r *PostgresInventoryRepository) Count(ctx context.Context, filter *model.InventoryFilter) (int64, error) {
+func (r *PostgresInventoryRepository) Count(ctx context.Context, filter *repository.InventoryFilter) (int64, error) {
 	query := `SELECT COUNT(*) FROM inventories WHERE 1=1`
 
 	args := []interface{}{}
@@ -246,27 +222,27 @@ func (r *PostgresInventoryRepository) Count(ctx context.Context, filter *model.I
 
 	if filter != nil {
 		if filter.SKU != nil {
-			query += " AND sku LIKE $" + string(rune('0'+argCount))
+			query += fmt.Sprintf(" AND sku LIKE $%d", argCount)
 			args = append(args, "%"+*filter.SKU+"%")
 			argCount++
 		}
 		if filter.Name != nil {
-			query += " AND name LIKE $" + string(rune('0'+argCount))
+			query += fmt.Sprintf(" AND name LIKE $%d", argCount)
 			args = append(args, "%"+*filter.Name+"%")
 			argCount++
 		}
 		if filter.Location != nil {
-			query += " AND location = $" + string(rune('0'+argCount))
+			query += fmt.Sprintf(" AND location = $%d", argCount)
 			args = append(args, *filter.Location)
 			argCount++
 		}
 		if filter.MinQty != nil {
-			query += " AND quantity >= $" + string(rune('0'+argCount))
+			query += fmt.Sprintf(" AND quantity >= $%d", argCount)
 			args = append(args, *filter.MinQty)
 			argCount++
 		}
 		if filter.MaxQty != nil {
-			query += " AND quantity <= $" + string(rune('0'+argCount))
+			query += fmt.Sprintf(" AND quantity <= $%d", argCount)
 			args = append(args, *filter.MaxQty)
 			argCount++
 		}
@@ -300,15 +276,6 @@ func (r *PostgresInventoryRepository) ExistsBySKU(ctx context.Context, sku strin
 	return exists, err
 }
 
-// Helper function to build parameterized query placeholders for PostgreSQL
-func buildPlaceholders(start int, count int) []string {
-	placeholders := make([]string, count)
-	for i := 0; i < count; i++ {
-		placeholders[i] = "$" + string(rune('0'+start+i))
-	}
-	return placeholders
-}
-
 // MemoryInventoryRepository is an in-memory implementation for testing
 type MemoryInventoryRepository struct {
 	items map[string]*model.Inventory
@@ -323,10 +290,26 @@ func NewMemoryInventoryRepository() repository.InventoryRepository {
 
 // Create creates a new inventory item
 func (r *MemoryInventoryRepository) Create(ctx context.Context, inventory *model.Inventory) error {
-	now := time.Now()
-	inventory.CreatedAt = now
-	inventory.UpdatedAt = now
-	r.items[inventory.ID] = inventory
+	// Generate ID if not set
+	if inventory.ID() == "" {
+		// We can't set ID directly since it's private, so we reconstruct with an ID
+		id := uuid.New().String()
+		*inventory = *model.ReconstructInventory(
+			id,
+			inventory.SKU(),
+			inventory.Name(),
+			inventory.Description(),
+			inventory.Quantity(),
+			inventory.Unit(),
+			inventory.Location(),
+			inventory.MinStock(),
+			inventory.MaxStock(),
+			inventory.Price(),
+			inventory.CreatedAt(),
+			inventory.UpdatedAt(),
+		)
+	}
+	r.items[inventory.ID()] = inventory
 	return nil
 }
 
@@ -341,7 +324,7 @@ func (r *MemoryInventoryRepository) GetByID(ctx context.Context, id string) (*mo
 // GetBySKU retrieves an inventory item by its SKU
 func (r *MemoryInventoryRepository) GetBySKU(ctx context.Context, sku string) (*model.Inventory, error) {
 	for _, inv := range r.items {
-		if inv.SKU == sku {
+		if inv.SKU() == sku {
 			return inv, nil
 		}
 	}
@@ -350,8 +333,7 @@ func (r *MemoryInventoryRepository) GetBySKU(ctx context.Context, sku string) (*
 
 // Update updates an existing inventory item
 func (r *MemoryInventoryRepository) Update(ctx context.Context, inventory *model.Inventory) error {
-	inventory.UpdatedAt = time.Now()
-	r.items[inventory.ID] = inventory
+	r.items[inventory.ID()] = inventory
 	return nil
 }
 
@@ -362,24 +344,24 @@ func (r *MemoryInventoryRepository) Delete(ctx context.Context, id string) error
 }
 
 // List retrieves a list of inventory items with optional filtering
-func (r *MemoryInventoryRepository) List(ctx context.Context, filter *model.InventoryFilter) ([]*model.Inventory, error) {
+func (r *MemoryInventoryRepository) List(ctx context.Context, filter *repository.InventoryFilter) ([]*model.Inventory, error) {
 	var result []*model.Inventory
 
 	for _, inv := range r.items {
 		if filter != nil {
-			if filter.SKU != nil && !strings.Contains(inv.SKU, *filter.SKU) {
+			if filter.SKU != nil && !strings.Contains(inv.SKU(), *filter.SKU) {
 				continue
 			}
-			if filter.Name != nil && !strings.Contains(inv.Name, *filter.Name) {
+			if filter.Name != nil && !strings.Contains(inv.Name(), *filter.Name) {
 				continue
 			}
-			if filter.Location != nil && inv.Location != *filter.Location {
+			if filter.Location != nil && inv.Location() != *filter.Location {
 				continue
 			}
-			if filter.MinQty != nil && inv.Quantity < *filter.MinQty {
+			if filter.MinQty != nil && inv.Quantity() < *filter.MinQty {
 				continue
 			}
-			if filter.MaxQty != nil && inv.Quantity > *filter.MaxQty {
+			if filter.MaxQty != nil && inv.Quantity() > *filter.MaxQty {
 				continue
 			}
 		}
@@ -405,16 +387,50 @@ func (r *MemoryInventoryRepository) List(ctx context.Context, filter *model.Inve
 }
 
 // Count returns the total count of inventory items
-func (r *MemoryInventoryRepository) Count(ctx context.Context, filter *model.InventoryFilter) (int64, error) {
-	list, err := r.List(ctx, filter)
-	return int64(len(list)), err
+func (r *MemoryInventoryRepository) Count(ctx context.Context, filter *repository.InventoryFilter) (int64, error) {
+	// Count all items without filter, or count filtered items
+	count := 0
+	for _, inv := range r.items {
+		if filter != nil {
+			if filter.SKU != nil && !strings.Contains(inv.SKU(), *filter.SKU) {
+				continue
+			}
+			if filter.Name != nil && !strings.Contains(inv.Name(), *filter.Name) {
+				continue
+			}
+			if filter.Location != nil && inv.Location() != *filter.Location {
+				continue
+			}
+			if filter.MinQty != nil && inv.Quantity() < *filter.MinQty {
+				continue
+			}
+			if filter.MaxQty != nil && inv.Quantity() > *filter.MaxQty {
+				continue
+			}
+		}
+		count++
+	}
+	return int64(count), nil
 }
 
 // UpdateQuantity updates the quantity of an inventory item
 func (r *MemoryInventoryRepository) UpdateQuantity(ctx context.Context, id string, quantity int) error {
 	if inv, ok := r.items[id]; ok {
-		inv.Quantity = quantity
-		inv.UpdatedAt = time.Now()
+		// We can't directly set quantity, so reconstruct
+		*inv = *model.ReconstructInventory(
+			inv.ID(),
+			inv.SKU(),
+			inv.Name(),
+			inv.Description(),
+			quantity,
+			inv.Unit(),
+			inv.Location(),
+			inv.MinStock(),
+			inv.MaxStock(),
+			inv.Price(),
+			inv.CreatedAt(),
+			time.Now(),
+		)
 	}
 	return nil
 }
@@ -422,7 +438,7 @@ func (r *MemoryInventoryRepository) UpdateQuantity(ctx context.Context, id strin
 // ExistsBySKU checks if an inventory item with the given SKU exists
 func (r *MemoryInventoryRepository) ExistsBySKU(ctx context.Context, sku string, excludeID string) (bool, error) {
 	for id, inv := range r.items {
-		if inv.SKU == sku && id != excludeID {
+		if inv.SKU() == sku && id != excludeID {
 			return true, nil
 		}
 	}

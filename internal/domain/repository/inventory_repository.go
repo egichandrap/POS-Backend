@@ -6,6 +6,17 @@ import (
 	"github.com/example/jwt-ddd-clean/internal/domain/model"
 )
 
+// InventoryFilter defines filter options for inventory queries
+type InventoryFilter struct {
+	SKU      *string
+	Name     *string
+	Location *string
+	MinQty   *int
+	MaxQty   *int
+	Limit    int
+	Offset   int
+}
+
 // InventoryRepository defines the interface for inventory data operations
 type InventoryRepository interface {
 	// Create creates a new inventory item
@@ -24,10 +35,10 @@ type InventoryRepository interface {
 	Delete(ctx context.Context, id string) error
 
 	// List retrieves a list of inventory items with optional filtering
-	List(ctx context.Context, filter *model.InventoryFilter) ([]*model.Inventory, error)
+	List(ctx context.Context, filter *InventoryFilter) ([]*model.Inventory, error)
 
 	// Count returns the total count of inventory items
-	Count(ctx context.Context, filter *model.InventoryFilter) (int64, error)
+	Count(ctx context.Context, filter *InventoryFilter) (int64, error)
 
 	// UpdateQuantity updates the quantity of an inventory item
 	UpdateQuantity(ctx context.Context, id string, quantity int) error

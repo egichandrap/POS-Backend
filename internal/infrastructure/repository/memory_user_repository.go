@@ -10,6 +10,7 @@ import (
 
 	"github.com/example/jwt-ddd-clean/internal/domain/model"
 	"github.com/example/jwt-ddd-clean/internal/domain/repository"
+	"github.com/example/jwt-ddd-clean/internal/domain/valueobject"
 	"github.com/google/uuid"
 )
 
@@ -34,48 +35,49 @@ func NewMemoryUserRepository() *MemoryUserRepository {
 // seedDefaultUsers creates default users for development
 func (r *MemoryUserRepository) seedDefaultUsers() {
 	now := time.Now()
+	hashedPassword := valueobject.Password("$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy") // admin123
+	email1, _ := valueobject.NewEmail("superadmin@pos.local")
+	email2, _ := valueobject.NewEmail("admin@pos.local")
+	email3, _ := valueobject.NewEmail("cashier@pos.local")
 
 	// Super Admin
-	superAdmin := &model.User{
-		ID:           uuid.New().String(),
-		Username:     "superadmin",
-		PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy", // admin123
-		Email:        "superadmin@pos.local",
-		FullName:     "Super Administrator",
-		Role:         model.RoleSuperAdmin,
-		Status:       model.StatusActive,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	r.users[superAdmin.ID] = superAdmin
+	superAdmin := model.ReconstructUser(
+		uuid.New().String(),
+		"superadmin",
+		email1,
+		hashedPassword,
+		"Super Administrator",
+		model.RoleSuperAdmin,
+		model.StatusActive,
+		now, now, nil,
+	)
+	r.users[superAdmin.ID()] = superAdmin
 
 	// Admin
-	admin := &model.User{
-		ID:           uuid.New().String(),
-		Username:     "admin",
-		PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
-		Email:        "admin@pos.local",
-		FullName:     "Administrator",
-		Role:         model.RoleAdmin,
-		Status:       model.StatusActive,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	r.users[admin.ID] = admin
+	admin := model.ReconstructUser(
+		uuid.New().String(),
+		"admin",
+		email2,
+		hashedPassword,
+		"Administrator",
+		model.RoleAdmin,
+		model.StatusActive,
+		now, now, nil,
+	)
+	r.users[admin.ID()] = admin
 
 	// Cashier
-	cashier := &model.User{
-		ID:           uuid.New().String(),
-		Username:     "cashier",
-		PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
-		Email:        "cashier@pos.local",
-		FullName:     "Cashier User",
-		Role:         model.RoleCashier,
-		Status:       model.StatusActive,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	r.users[cashier.ID] = cashier
+	cashier := model.ReconstructUser(
+		uuid.New().String(),
+		"cashier",
+		email3,
+		hashedPassword,
+		"Cashier User",
+		model.RoleCashier,
+		model.StatusActive,
+		now, now, nil,
+	)
+	r.users[cashier.ID()] = cashier
 }
 
 // FindByID retrieves a user by their ID
@@ -97,7 +99,7 @@ func (r *MemoryUserRepository) FindByUsername(ctx context.Context, username stri
 	defer r.mu.RUnlock()
 
 	for _, user := range r.users {
-		if strings.EqualFold(user.Username, username) {
+		if strings.EqualFold(user.Username(), username) {
 			return user, nil
 		}
 	}
@@ -111,7 +113,7 @@ func (r *MemoryUserRepository) FindByEmail(ctx context.Context, email string) (*
 	defer r.mu.RUnlock()
 
 	for _, user := range r.users {
-		if strings.EqualFold(user.Email, email) {
+		if strings.EqualFold(user.Email().String(), email) {
 			return user, nil
 		}
 	}
@@ -124,12 +126,7 @@ func (r *MemoryUserRepository) Create(ctx context.Context, user *model.User) err
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Generate ID if empty
-	if user.ID == "" {
-		user.ID = uuid.New().String()
-	}
-
-	r.users[user.ID] = user
+	r.users[user.ID()] = user
 	return nil
 }
 
@@ -138,12 +135,12 @@ func (r *MemoryUserRepository) Update(ctx context.Context, user *model.User) err
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	_, exists := r.users[user.ID]
+	_, exists := r.users[user.ID()]
 	if !exists {
 		return fmt.Errorf("user not found")
 	}
 
-	r.users[user.ID] = user
+	r.users[user.ID()] = user
 	return nil
 }
 
@@ -236,7 +233,7 @@ func (r *MemoryUserRepository) ExistsByUsername(ctx context.Context, username st
 	defer r.mu.RUnlock()
 
 	for _, user := range r.users {
-		if strings.EqualFold(user.Username, username) {
+		if strings.EqualFold(user.Username(), username) {
 			return true, nil
 		}
 	}
@@ -250,7 +247,7 @@ func (r *MemoryUserRepository) ExistsByEmail(ctx context.Context, email string) 
 	defer r.mu.RUnlock()
 
 	for _, user := range r.users {
-		if strings.EqualFold(user.Email, email) {
+		if strings.EqualFold(user.Email().String(), email) {
 			return true, nil
 		}
 	}
@@ -268,8 +265,7 @@ func (r *MemoryUserRepository) UpdatePassword(ctx context.Context, id, hashedPas
 		return fmt.Errorf("user not found")
 	}
 
-	user.PasswordHash = hashedPassword
-	user.UpdatedAt = time.Now()
+	user.UpdatePassword(valueobject.Password(hashedPassword))
 	return nil
 }
 
@@ -283,25 +279,23 @@ func (r *MemoryUserRepository) UpdateLastLogin(ctx context.Context, id string) e
 		return fmt.Errorf("user not found")
 	}
 
-	now := time.Now()
-	user.LastLoginAt = &now
-	user.UpdatedAt = now
+	user.RecordLogin()
 	return nil
 }
 
 // matchesUserFilter checks if a user matches the filter
 func matchesUserFilter(user *model.User, filter repository.UserFilter) bool {
-	if filter.Role != "" && user.Role != filter.Role {
+	if filter.Role != "" && user.Role() != filter.Role {
 		return false
 	}
-	if filter.Status != "" && user.Status != filter.Status {
+	if filter.Status != "" && user.Status() != filter.Status {
 		return false
 	}
 	if filter.Search != "" {
 		search := strings.ToLower(filter.Search)
-		if !strings.Contains(strings.ToLower(user.Username), search) &&
-			!strings.Contains(strings.ToLower(user.Email), search) &&
-			!strings.Contains(strings.ToLower(user.FullName), search) {
+		if !strings.Contains(strings.ToLower(user.Username()), search) &&
+			!strings.Contains(strings.ToLower(user.Email().String()), search) &&
+			!strings.Contains(strings.ToLower(user.FullName()), search) {
 			return false
 		}
 	}

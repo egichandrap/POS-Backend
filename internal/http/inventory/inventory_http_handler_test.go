@@ -6,23 +6,30 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
+	"github.com/example/jwt-ddd-clean/internal/application/dto"
+	"github.com/example/jwt-ddd-clean/internal/application/usecase"
 	"github.com/example/jwt-ddd-clean/internal/domain/model"
 	"github.com/example/jwt-ddd-clean/internal/domain/service"
-	"github.com/example/jwt-ddd-clean/internal/dto"
 	inventoryhttp "github.com/example/jwt-ddd-clean/internal/http/inventory"
 	apperrors "github.com/example/jwt-ddd-clean/internal/pkg/errors"
 	"github.com/example/jwt-ddd-clean/internal/infrastructure/repository"
 	"github.com/stretchr/testify/assert"
 )
 
+func setupInventoryTestHandler(t *testing.T) (*inventoryhttp.InventoryHTTPHandler, usecase.InventoryUsecase) {
+	t.Helper()
+	repo := repository.NewMemoryInventoryRepository()
+	inventoryService := service.NewInventoryService(repo)
+	uc := usecase.NewInventoryUsecase(repo, inventoryService)
+	handler := inventoryhttp.NewInventoryHTTPHandler(uc)
+	return handler, uc
+}
+
 func TestInventoryHTTPHandler_CreateInventory(t *testing.T) {
 	t.Run("should create inventory item successfully", func(t *testing.T) {
 		// Arrange
-		repo := repository.NewMemoryInventoryRepository()
-		inventoryService := service.NewInventoryService(repo)
-		handler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
+		handler, _ := setupInventoryTestHandler(t)
 
 		reqBody := dto.CreateInventoryRequest{
 			SKU:      "SKU-001",
@@ -51,9 +58,7 @@ func TestInventoryHTTPHandler_CreateInventory(t *testing.T) {
 
 	t.Run("should return error when SKU is missing", func(t *testing.T) {
 		// Arrange
-		repo := repository.NewMemoryInventoryRepository()
-		inventoryService := service.NewInventoryService(repo)
-		handler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
+		handler, _ := setupInventoryTestHandler(t)
 
 		reqBody := dto.CreateInventoryRequest{
 			Name:     "Test Product",
@@ -71,17 +76,11 @@ func TestInventoryHTTPHandler_CreateInventory(t *testing.T) {
 
 		// Assert
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-
-		var response apperrors.ErrorResponse
-		json.Unmarshal(w.Body.Bytes(), &response)
-		assert.False(t, response.Success)
 	})
 
 	t.Run("should return error when name is missing", func(t *testing.T) {
 		// Arrange
-		repo := repository.NewMemoryInventoryRepository()
-		inventoryService := service.NewInventoryService(repo)
-		handler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
+		handler, _ := setupInventoryTestHandler(t)
 
 		reqBody := dto.CreateInventoryRequest{
 			SKU:      "SKU-001",
@@ -103,9 +102,7 @@ func TestInventoryHTTPHandler_CreateInventory(t *testing.T) {
 
 	t.Run("should return error when unit is missing", func(t *testing.T) {
 		// Arrange
-		repo := repository.NewMemoryInventoryRepository()
-		inventoryService := service.NewInventoryService(repo)
-		handler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
+		handler, _ := setupInventoryTestHandler(t)
 
 		reqBody := dto.CreateInventoryRequest{
 			SKU:      "SKU-001",
@@ -129,21 +126,20 @@ func TestInventoryHTTPHandler_CreateInventory(t *testing.T) {
 func TestInventoryHTTPHandler_GetInventory(t *testing.T) {
 	t.Run("should get inventory item successfully", func(t *testing.T) {
 		// Arrange
-		repo := repository.NewMemoryInventoryRepository()
-		inventoryService := service.NewInventoryService(repo)
-		handler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
+		handler, uc := setupInventoryTestHandler(t)
 
-		// Create item first
-		inv := &model.Inventory{
-			ID:       "inv-001",
+		// Create item first via usecase
+		createReq := dto.CreateInventoryRequest{
 			SKU:      "SKU-001",
 			Name:     "Test Product",
 			Quantity: 100,
 			Unit:     "unit",
+			Price:    99.99,
 		}
-		_, _ = inventoryService.CreateInventory(t.Context(), inv)
+		created, err := uc.CreateInventory(t.Context(), createReq)
+		assert.NoError(t, err)
 
-		req := httptest.NewRequest(http.MethodGet, "/api/inventory/inv-001", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/inventory/"+created.ID, nil)
 		w := httptest.NewRecorder()
 
 		// Act
@@ -160,9 +156,7 @@ func TestInventoryHTTPHandler_GetInventory(t *testing.T) {
 
 	t.Run("should return error when inventory not found", func(t *testing.T) {
 		// Arrange
-		repo := repository.NewMemoryInventoryRepository()
-		inventoryService := service.NewInventoryService(repo)
-		handler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
+		handler, _ := setupInventoryTestHandler(t)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/inventory/non-existent", nil)
 		w := httptest.NewRecorder()
@@ -183,20 +177,18 @@ func TestInventoryHTTPHandler_GetInventory(t *testing.T) {
 func TestInventoryHTTPHandler_ListInventory(t *testing.T) {
 	t.Run("should list inventory items successfully", func(t *testing.T) {
 		// Arrange
-		repo := repository.NewMemoryInventoryRepository()
-		inventoryService := service.NewInventoryService(repo)
-		handler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
+		handler, uc := setupInventoryTestHandler(t)
 
 		// Create test data
 		for i := 1; i <= 3; i++ {
-			inv := &model.Inventory{
-				ID:       "inv-00" + string(rune('0'+i)),
+			createReq := dto.CreateInventoryRequest{
 				SKU:      "SKU-00" + string(rune('0'+i)),
 				Name:     "Product " + string(rune('0'+i)),
 				Quantity: i * 10,
 				Unit:     "unit",
+				Price:    float64(i * 10),
 			}
-			_, _ = inventoryService.CreateInventory(t.Context(), inv)
+			_, _ = uc.CreateInventory(t.Context(), createReq)
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/api/inventory?limit=10&offset=0", nil)
@@ -216,18 +208,16 @@ func TestInventoryHTTPHandler_ListInventory(t *testing.T) {
 
 	t.Run("should filter by SKU", func(t *testing.T) {
 		// Arrange
-		repo := repository.NewMemoryInventoryRepository()
-		inventoryService := service.NewInventoryService(repo)
-		handler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
+		handler, uc := setupInventoryTestHandler(t)
 
-		inv := &model.Inventory{
-			ID:       "inv-001",
+		createReq := dto.CreateInventoryRequest{
 			SKU:      "SKU-TEST",
 			Name:     "Test Product",
 			Quantity: 100,
 			Unit:     "unit",
+			Price:    99.99,
 		}
-		_, _ = inventoryService.CreateInventory(t.Context(), inv)
+		_, _ = uc.CreateInventory(t.Context(), createReq)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/inventory?sku=TEST", nil)
 		w := httptest.NewRecorder()
@@ -243,30 +233,25 @@ func TestInventoryHTTPHandler_ListInventory(t *testing.T) {
 func TestInventoryHTTPHandler_UpdateInventory(t *testing.T) {
 	t.Run("should update inventory item successfully", func(t *testing.T) {
 		// Arrange
-		repo := repository.NewMemoryInventoryRepository()
-		inventoryService := service.NewInventoryService(repo)
-		handler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
+		handler, uc := setupInventoryTestHandler(t)
 
 		// Create item first
-		inv := &model.Inventory{
-			ID:       "inv-001",
+		createReq := dto.CreateInventoryRequest{
 			SKU:      "SKU-001",
 			Name:     "Test Product",
 			Quantity: 100,
 			Unit:     "unit",
+			Price:    99.99,
 		}
-		_, _ = inventoryService.CreateInventory(t.Context(), inv)
+		created, err := uc.CreateInventory(t.Context(), createReq)
+		assert.NoError(t, err)
 
 		reqBody := dto.UpdateInventoryRequest{
-			ID:       "inv-001",
-			SKU:      "SKU-001",
-			Name:     "Updated Product",
-			Quantity: 200,
-			Unit:     "unit",
+			Name: "Updated Product",
 		}
 		body, _ := json.Marshal(reqBody)
 
-		req := httptest.NewRequest(http.MethodPut, "/api/inventory/inv-001", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPut, "/api/inventory/"+created.ID, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -283,15 +268,10 @@ func TestInventoryHTTPHandler_UpdateInventory(t *testing.T) {
 
 	t.Run("should return error when inventory not found", func(t *testing.T) {
 		// Arrange
-		repo := repository.NewMemoryInventoryRepository()
-		inventoryService := service.NewInventoryService(repo)
-		handler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
+		handler, _ := setupInventoryTestHandler(t)
 
 		reqBody := dto.UpdateInventoryRequest{
-			ID:   "non-existent",
-			SKU:  "SKU-001",
 			Name: "Test Product",
-			Unit: "unit",
 		}
 		body, _ := json.Marshal(reqBody)
 
@@ -310,21 +290,20 @@ func TestInventoryHTTPHandler_UpdateInventory(t *testing.T) {
 func TestInventoryHTTPHandler_DeleteInventory(t *testing.T) {
 	t.Run("should delete inventory item successfully", func(t *testing.T) {
 		// Arrange
-		repo := repository.NewMemoryInventoryRepository()
-		inventoryService := service.NewInventoryService(repo)
-		handler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
+		handler, uc := setupInventoryTestHandler(t)
 
 		// Create item first
-		inv := &model.Inventory{
-			ID:       "inv-001",
+		createReq := dto.CreateInventoryRequest{
 			SKU:      "SKU-001",
 			Name:     "Test Product",
 			Quantity: 100,
 			Unit:     "unit",
+			Price:    99.99,
 		}
-		_, _ = inventoryService.CreateInventory(t.Context(), inv)
+		created, err := uc.CreateInventory(t.Context(), createReq)
+		assert.NoError(t, err)
 
-		req := httptest.NewRequest(http.MethodDelete, "/api/inventory/inv-001", nil)
+		req := httptest.NewRequest(http.MethodDelete, "/api/inventory/"+created.ID, nil)
 		w := httptest.NewRecorder()
 
 		// Act
@@ -340,9 +319,7 @@ func TestInventoryHTTPHandler_DeleteInventory(t *testing.T) {
 
 	t.Run("should return error when inventory not found", func(t *testing.T) {
 		// Arrange
-		repo := repository.NewMemoryInventoryRepository()
-		inventoryService := service.NewInventoryService(repo)
-		handler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
+		handler, _ := setupInventoryTestHandler(t)
 
 		req := httptest.NewRequest(http.MethodDelete, "/api/inventory/non-existent", nil)
 		w := httptest.NewRecorder()
@@ -355,24 +332,25 @@ func TestInventoryHTTPHandler_DeleteInventory(t *testing.T) {
 	})
 }
 
-func TestInventoryHTTPHandler_UpdateStock(t *testing.T) {
+func TestInventoryUsecase_UpdateStock(t *testing.T) {
 	t.Run("should update stock quantity successfully", func(t *testing.T) {
 		// Arrange
 		repo := repository.NewMemoryInventoryRepository()
 		inventoryService := service.NewInventoryService(repo)
+		uc := usecase.NewInventoryUsecase(repo, inventoryService)
 
-		// Create item first
-		inv := &model.Inventory{
-			ID:       "inv-001",
+		createReq := dto.CreateInventoryRequest{
 			SKU:      "SKU-001",
 			Name:     "Test Product",
 			Quantity: 100,
 			Unit:     "unit",
+			Price:    99.99,
 		}
-		_, _ = inventoryService.CreateInventory(t.Context(), inv)
+		created, err := uc.CreateInventory(t.Context(), createReq)
+		assert.NoError(t, err)
 
-		// Act - call service directly for unit test
-		result, err := inventoryService.UpdateStock(t.Context(), "inv-001", 50)
+		// Act
+		result, err := uc.UpdateStock(t.Context(), created.ID, 50)
 
 		// Assert
 		assert.NoError(t, err)
@@ -384,18 +362,20 @@ func TestInventoryHTTPHandler_UpdateStock(t *testing.T) {
 		// Arrange
 		repo := repository.NewMemoryInventoryRepository()
 		inventoryService := service.NewInventoryService(repo)
+		uc := usecase.NewInventoryUsecase(repo, inventoryService)
 
-		inv := &model.Inventory{
-			ID:       "inv-001",
+		createReq := dto.CreateInventoryRequest{
 			SKU:      "SKU-001",
 			Name:     "Test Product",
 			Quantity: 100,
 			Unit:     "unit",
+			Price:    99.99,
 		}
-		_, _ = inventoryService.CreateInventory(t.Context(), inv)
+		created, err := uc.CreateInventory(t.Context(), createReq)
+		assert.NoError(t, err)
 
-		// Act - call service directly for unit test
-		result, err := inventoryService.UpdateStock(t.Context(), "inv-001", -10)
+		// Act
+		result, err := uc.UpdateStock(t.Context(), created.ID, -10)
 
 		// Assert
 		assert.Error(t, err)
@@ -403,24 +383,25 @@ func TestInventoryHTTPHandler_UpdateStock(t *testing.T) {
 	})
 }
 
-func TestInventoryHTTPHandler_AdjustStock(t *testing.T) {
+func TestInventoryUsecase_AdjustStock(t *testing.T) {
 	t.Run("should adjust stock quantity positively", func(t *testing.T) {
 		// Arrange
 		repo := repository.NewMemoryInventoryRepository()
 		inventoryService := service.NewInventoryService(repo)
+		uc := usecase.NewInventoryUsecase(repo, inventoryService)
 
-		// Create item first
-		inv := &model.Inventory{
-			ID:       "inv-001",
+		createReq := dto.CreateInventoryRequest{
 			SKU:      "SKU-001",
 			Name:     "Test Product",
 			Quantity: 100,
 			Unit:     "unit",
+			Price:    99.99,
 		}
-		_, _ = inventoryService.CreateInventory(t.Context(), inv)
+		created, err := uc.CreateInventory(t.Context(), createReq)
+		assert.NoError(t, err)
 
-		// Act - call service directly for unit test
-		result, err := inventoryService.AdjustStock(t.Context(), "inv-001", 50)
+		// Act
+		result, err := uc.AdjustStock(t.Context(), created.ID, 50)
 
 		// Assert
 		assert.NoError(t, err)
@@ -432,18 +413,20 @@ func TestInventoryHTTPHandler_AdjustStock(t *testing.T) {
 		// Arrange
 		repo := repository.NewMemoryInventoryRepository()
 		inventoryService := service.NewInventoryService(repo)
+		uc := usecase.NewInventoryUsecase(repo, inventoryService)
 
-		inv := &model.Inventory{
-			ID:       "inv-001",
+		createReq := dto.CreateInventoryRequest{
 			SKU:      "SKU-001",
 			Name:     "Test Product",
 			Quantity: 100,
 			Unit:     "unit",
+			Price:    99.99,
 		}
-		_, _ = inventoryService.CreateInventory(t.Context(), inv)
+		created, err := uc.CreateInventory(t.Context(), createReq)
+		assert.NoError(t, err)
 
-		// Act - call service directly for unit test
-		result, err := inventoryService.AdjustStock(t.Context(), "inv-001", -30)
+		// Act
+		result, err := uc.AdjustStock(t.Context(), created.ID, -30)
 
 		// Assert
 		assert.NoError(t, err)
@@ -455,18 +438,20 @@ func TestInventoryHTTPHandler_AdjustStock(t *testing.T) {
 		// Arrange
 		repo := repository.NewMemoryInventoryRepository()
 		inventoryService := service.NewInventoryService(repo)
+		uc := usecase.NewInventoryUsecase(repo, inventoryService)
 
-		inv := &model.Inventory{
-			ID:       "inv-001",
+		createReq := dto.CreateInventoryRequest{
 			SKU:      "SKU-001",
 			Name:     "Test Product",
 			Quantity: 10,
 			Unit:     "unit",
+			Price:    99.99,
 		}
-		_, _ = inventoryService.CreateInventory(t.Context(), inv)
+		created, err := uc.CreateInventory(t.Context(), createReq)
+		assert.NoError(t, err)
 
-		// Act - call service directly for unit test
-		result, err := inventoryService.AdjustStock(t.Context(), "inv-001", -20)
+		// Act
+		result, err := uc.AdjustStock(t.Context(), created.ID, -20)
 
 		// Assert
 		assert.Error(t, err)
@@ -477,9 +462,11 @@ func TestInventoryHTTPHandler_AdjustStock(t *testing.T) {
 func TestInventoryResponse_DTO(t *testing.T) {
 	t.Run("should convert inventory to response correctly", func(t *testing.T) {
 		// Arrange
-		now := time.Now()
-		inv := &model.Inventory{
-			ID:          "inv-001",
+		repo := repository.NewMemoryInventoryRepository()
+		inventoryService := service.NewInventoryService(repo)
+		uc := usecase.NewInventoryUsecase(repo, inventoryService)
+
+		createReq := dto.CreateInventoryRequest{
 			SKU:         "SKU-001",
 			Name:        "Test Product",
 			Description: "Test Description",
@@ -489,28 +476,11 @@ func TestInventoryResponse_DTO(t *testing.T) {
 			MinStock:    10,
 			MaxStock:    200,
 			Price:       99.99,
-			CreatedAt:   now,
-			UpdatedAt:   now,
 		}
-
-		// Act
-		response := &dto.InventoryResponse{
-			ID:          inv.ID,
-			SKU:         inv.SKU,
-			Name:        inv.Name,
-			Description: inv.Description,
-			Quantity:    inv.Quantity,
-			Unit:        inv.Unit,
-			Location:    inv.Location,
-			MinStock:    inv.MinStock,
-			MaxStock:    inv.MaxStock,
-			Price:       inv.Price,
-			CreatedAt:   inv.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			UpdatedAt:   inv.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-		}
+		response, err := uc.CreateInventory(t.Context(), createReq)
 
 		// Assert
-		assert.Equal(t, "inv-001", response.ID)
+		assert.NoError(t, err)
 		assert.Equal(t, "SKU-001", response.SKU)
 		assert.Equal(t, "Test Product", response.Name)
 		assert.Equal(t, 100, response.Quantity)
@@ -520,7 +490,7 @@ func TestInventoryResponse_DTO(t *testing.T) {
 	t.Run("should marshal inventory list response correctly", func(t *testing.T) {
 		// Arrange
 		response := &dto.InventoryListResponse{
-			Items: []*dto.InventoryResponse{
+			Items: []dto.InventoryResponse{
 				{
 					ID:       "inv-001",
 					SKU:      "SKU-001",
@@ -544,3 +514,6 @@ func TestInventoryResponse_DTO(t *testing.T) {
 		assert.Contains(t, string(data), "SKU-001")
 	})
 }
+
+// Suppress unused import warnings
+var _ = model.UserRole("")

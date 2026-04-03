@@ -5,23 +5,23 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/example/jwt-ddd-clean/internal/dto"
+	"github.com/example/jwt-ddd-clean/internal/application/dto"
+	"github.com/example/jwt-ddd-clean/internal/application/usecase"
 	"github.com/example/jwt-ddd-clean/internal/domain/model"
 	"github.com/example/jwt-ddd-clean/internal/domain/repository"
-	"github.com/example/jwt-ddd-clean/internal/domain/service"
 	"github.com/example/jwt-ddd-clean/internal/pkg/errors"
 	"github.com/gorilla/mux"
 )
 
 // AuthHandler handles authentication HTTP requests
 type AuthHandler struct {
-	authService *service.AuthService
+	authUsecase usecase.AuthUsecase
 }
 
 // NewAuthHandler creates a new AuthHandler
-func NewAuthHandler(authService *service.AuthService) *AuthHandler {
+func NewAuthHandler(authUsecase usecase.AuthUsecase) *AuthHandler {
 	return &AuthHandler{
-		authService: authService,
+		authUsecase: authUsecase,
 	}
 }
 
@@ -39,7 +39,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := h.authService.Login(r.Context(), req)
+	response, err := h.authUsecase.Login(r.Context(), req)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -57,7 +57,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.authService.Logout(r.Context(), token)
+	err := h.authUsecase.Logout(r.Context(), token)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -84,7 +84,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		req.Role = model.RoleCashier // Default role
 	}
 
-	response, err := h.authService.Register(r.Context(), req)
+	response, err := h.authUsecase.Register(r.Context(), req)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -106,7 +106,7 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := h.authService.RefreshToken(r.Context(), req.RefreshToken)
+	response, err := h.authUsecase.RefreshToken(r.Context(), req.RefreshToken)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -120,7 +120,7 @@ func (h *AuthHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	// Get user ID from context (set by auth middleware)
 	userID := r.Context().Value("user_id").(string)
 
-	response, err := h.authService.GetMe(r.Context(), userID)
+	response, err := h.authUsecase.GetMe(r.Context(), userID)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -144,7 +144,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.authService.ChangePassword(r.Context(), userID, req)
+	err := h.authUsecase.ChangePassword(r.Context(), userID, req)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -171,7 +171,7 @@ func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		req.Role = model.RoleCashier // Default role
 	}
 
-	response, err := h.authService.Register(r.Context(), req)
+	response, err := h.authUsecase.Register(r.Context(), req)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -208,7 +208,7 @@ func (h *AuthHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		Offset: offset,
 	}
 
-	response, err := h.authService.ListUsers(r.Context(), filter)
+	response, err := h.authUsecase.ListUsers(r.Context(), filter)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -224,7 +224,7 @@ func (h *AuthHandler) GetUserByID(w http.ResponseWriter, r *http.Request) {
 
 	// We'll use GetMe logic but for specific user
 	// This requires admin permission
-	response, err := h.authService.GetMe(r.Context(), userID)
+	response, err := h.authUsecase.GetMe(r.Context(), userID)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -244,7 +244,7 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := h.authService.UpdateUser(r.Context(), userID, req)
+	response, err := h.authUsecase.UpdateUser(r.Context(), userID, req)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -258,7 +258,7 @@ func (h *AuthHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID := vars["id"]
 
-	err := h.authService.DeleteUser(r.Context(), userID)
+	err := h.authUsecase.DeleteUser(r.Context(), userID)
 	if err != nil {
 		h.sendError(w, err)
 		return

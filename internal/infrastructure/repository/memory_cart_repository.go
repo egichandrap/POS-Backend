@@ -27,7 +27,7 @@ func (r *MemoryCartRepository) Create(ctx context.Context, cart *model.Cart) err
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.carts[cart.ID] = cart
+	r.carts[cart.ID()] = cart
 	return nil
 }
 
@@ -50,7 +50,7 @@ func (r *MemoryCartRepository) GetByUserID(ctx context.Context, userID string) (
 	defer r.mu.RUnlock()
 
 	for _, cart := range r.carts {
-		if cart.UserID == userID {
+		if cart.UserID() == userID {
 			return cart, nil
 		}
 	}
@@ -63,7 +63,7 @@ func (r *MemoryCartRepository) Update(ctx context.Context, cart *model.Cart) err
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.carts[cart.ID] = cart
+	r.carts[cart.ID()] = cart
 	return nil
 }
 

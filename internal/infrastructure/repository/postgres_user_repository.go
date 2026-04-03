@@ -9,6 +9,7 @@ import (
 
 	"github.com/example/jwt-ddd-clean/internal/domain/model"
 	"github.com/example/jwt-ddd-clean/internal/domain/repository"
+	"github.com/example/jwt-ddd-clean/internal/domain/valueobject"
 )
 
 // PostgresUserRepository implements repository.UserRepository for PostgreSQL
@@ -21,6 +22,40 @@ func NewPostgresUserRepository(db *sql.DB) *PostgresUserRepository {
 	return &PostgresUserRepository{db: db}
 }
 
+func scanUser(row *sql.Row) (*model.User, error) {
+	var id, username, passwordHash, emailStr, fullName string
+	var roleStr, statusStr string
+	var createdAt, updatedAt time.Time
+	var lastLoginAt sql.NullTime
+
+	err := row.Scan(
+		&id, &username, &passwordHash, &emailStr, &fullName,
+		&roleStr, &statusStr, &createdAt, &updatedAt, &lastLoginAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, fmt.Errorf("failed to query user: %w", err)
+	}
+
+	email, _ := valueobject.NewEmail(emailStr)
+	password := valueobject.Password(passwordHash)
+	role := model.UserRole(roleStr)
+	status := model.UserStatus(statusStr)
+
+	user := model.ReconstructUser(id, username, email, password, fullName, role, status, createdAt, updatedAt, nil)
+
+	if lastLoginAt.Valid {
+		// Record login sets lastLoginAt - we need to set it manually
+		// Since we can't access private field, we use a different approach
+		// For now, just reconstruct with the lastLoginAt
+		user = model.ReconstructUser(id, username, email, password, fullName, role, status, createdAt, updatedAt, &lastLoginAt.Time)
+	}
+
+	return user, nil
+}
+
 // FindByID retrieves a user by their ID
 func (r *PostgresUserRepository) FindByID(ctx context.Context, id string) (*model.User, error) {
 	query := `
@@ -29,34 +64,7 @@ func (r *PostgresUserRepository) FindByID(ctx context.Context, id string) (*mode
 		WHERE id = $1
 	`
 
-	var user model.User
-	var lastLoginAt sql.NullTime
-
-	err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&user.ID,
-		&user.Username,
-		&user.PasswordHash,
-		&user.Email,
-		&user.FullName,
-		&user.Role,
-		&user.Status,
-		&user.CreatedAt,
-		&user.UpdatedAt,
-		&lastLoginAt,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("user not found")
-		}
-		return nil, fmt.Errorf("failed to query user: %w", err)
-	}
-
-	if lastLoginAt.Valid {
-		user.LastLoginAt = &lastLoginAt.Time
-	}
-
-	return &user, nil
+	return scanUser(r.db.QueryRowContext(ctx, query, id))
 }
 
 // FindByUsername retrieves a user by their username
@@ -67,34 +75,7 @@ func (r *PostgresUserRepository) FindByUsername(ctx context.Context, username st
 		WHERE username = $1
 	`
 
-	var user model.User
-	var lastLoginAt sql.NullTime
-
-	err := r.db.QueryRowContext(ctx, query, username).Scan(
-		&user.ID,
-		&user.Username,
-		&user.PasswordHash,
-		&user.Email,
-		&user.FullName,
-		&user.Role,
-		&user.Status,
-		&user.CreatedAt,
-		&user.UpdatedAt,
-		&lastLoginAt,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("user not found")
-		}
-		return nil, fmt.Errorf("failed to query user: %w", err)
-	}
-
-	if lastLoginAt.Valid {
-		user.LastLoginAt = &lastLoginAt.Time
-	}
-
-	return &user, nil
+	return scanUser(r.db.QueryRowContext(ctx, query, username))
 }
 
 // FindByEmail retrieves a user by their email
@@ -105,34 +86,7 @@ func (r *PostgresUserRepository) FindByEmail(ctx context.Context, email string) 
 		WHERE email = $1
 	`
 
-	var user model.User
-	var lastLoginAt sql.NullTime
-
-	err := r.db.QueryRowContext(ctx, query, email).Scan(
-		&user.ID,
-		&user.Username,
-		&user.PasswordHash,
-		&user.Email,
-		&user.FullName,
-		&user.Role,
-		&user.Status,
-		&user.CreatedAt,
-		&user.UpdatedAt,
-		&lastLoginAt,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("user not found")
-		}
-		return nil, fmt.Errorf("failed to query user: %w", err)
-	}
-
-	if lastLoginAt.Valid {
-		user.LastLoginAt = &lastLoginAt.Time
-	}
-
-	return &user, nil
+	return scanUser(r.db.QueryRowContext(ctx, query, email))
 }
 
 // Create creates a new user
@@ -143,15 +97,15 @@ func (r *PostgresUserRepository) Create(ctx context.Context, user *model.User) e
 	`
 
 	_, err := r.db.ExecContext(ctx, query,
-		user.ID,
-		user.Username,
-		user.PasswordHash,
-		user.Email,
-		user.FullName,
-		user.Role,
-		user.Status,
-		user.CreatedAt,
-		user.UpdatedAt,
+		user.ID(),
+		user.Username(),
+		user.PasswordHash().String(),
+		user.Email().String(),
+		user.FullName(),
+		user.Role(),
+		user.Status(),
+		user.CreatedAt(),
+		user.UpdatedAt(),
 	)
 
 	if err != nil {
@@ -170,12 +124,12 @@ func (r *PostgresUserRepository) Update(ctx context.Context, user *model.User) e
 	`
 
 	_, err := r.db.ExecContext(ctx, query,
-		user.ID,
-		user.Email,
-		user.FullName,
-		user.Role,
-		user.Status,
-		user.UpdatedAt,
+		user.ID(),
+		user.Email().String(),
+		user.FullName(),
+		user.Role(),
+		user.Status(),
+		user.UpdatedAt(),
 	)
 
 	if err != nil {
@@ -214,13 +168,13 @@ func (r *PostgresUserRepository) Count(ctx context.Context, filter repository.Us
 
 	if filter.Role != "" {
 		query += fmt.Sprintf(" AND role = $%d", argCount)
-		args = append(args, filter.Role)
+		args = append(args, string(filter.Role))
 		argCount++
 	}
 
 	if filter.Status != "" {
 		query += fmt.Sprintf(" AND status = $%d", argCount)
-		args = append(args, filter.Status)
+		args = append(args, string(filter.Status))
 		argCount++
 	}
 
@@ -258,13 +212,13 @@ func (r *PostgresUserRepository) ListWithPagination(ctx context.Context, filter 
 
 	if filter.Role != "" {
 		query += fmt.Sprintf(" AND role = $%d", argCount)
-		args = append(args, filter.Role)
+		args = append(args, string(filter.Role))
 		argCount++
 	}
 
 	if filter.Status != "" {
 		query += fmt.Sprintf(" AND status = $%d", argCount)
-		args = append(args, filter.Status)
+		args = append(args, string(filter.Status))
 		argCount++
 	}
 
@@ -296,30 +250,11 @@ func (r *PostgresUserRepository) ListWithPagination(ctx context.Context, filter 
 
 	users := make([]*model.User, 0)
 	for rows.Next() {
-		var user model.User
-		var lastLoginAt sql.NullTime
-
-		err := rows.Scan(
-			&user.ID,
-			&user.Username,
-			&user.PasswordHash,
-			&user.Email,
-			&user.FullName,
-			&user.Role,
-			&user.Status,
-			&user.CreatedAt,
-			&user.UpdatedAt,
-			&lastLoginAt,
-		)
+		user, err := scanRows(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan user: %w", err)
 		}
-
-		if lastLoginAt.Valid {
-			user.LastLoginAt = &lastLoginAt.Time
-		}
-
-		users = append(users, &user)
+		users = append(users, user)
 	}
 
 	totalPages := int(math.Ceil(float64(total) / float64(filter.Limit)))
@@ -331,6 +266,34 @@ func (r *PostgresUserRepository) ListWithPagination(ctx context.Context, filter 
 		Offset:     filter.Offset,
 		TotalPages: totalPages,
 	}, nil
+}
+
+func scanRows(rows *sql.Rows) (*model.User, error) {
+	var id, username, passwordHash, emailStr, fullName string
+	var roleStr, statusStr string
+	var createdAt, updatedAt time.Time
+	var lastLoginAt sql.NullTime
+
+	err := rows.Scan(
+		&id, &username, &passwordHash, &emailStr, &fullName,
+		&roleStr, &statusStr, &createdAt, &updatedAt, &lastLoginAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	email, _ := valueobject.NewEmail(emailStr)
+	password := valueobject.Password(passwordHash)
+	role := model.UserRole(roleStr)
+	status := model.UserStatus(statusStr)
+
+	user := model.ReconstructUser(id, username, email, password, fullName, role, status, createdAt, updatedAt, nil)
+
+	if lastLoginAt.Valid {
+		user = model.ReconstructUser(id, username, email, password, fullName, role, status, createdAt, updatedAt, &lastLoginAt.Time)
+	}
+
+	return user, nil
 }
 
 // ExistsByUsername checks if a username already exists

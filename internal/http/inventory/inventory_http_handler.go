@@ -7,23 +7,31 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
-
+	"github.com/example/jwt-ddd-clean/internal/application/dto"
+	"github.com/example/jwt-ddd-clean/internal/application/usecase"
+	"github.com/example/jwt-ddd-clean/internal/domain/repository"
 	apperrors "github.com/example/jwt-ddd-clean/internal/pkg/errors"
-	"github.com/example/jwt-ddd-clean/internal/domain/model"
-	"github.com/example/jwt-ddd-clean/internal/domain/service"
-	"github.com/example/jwt-ddd-clean/internal/dto"
 )
+
+// StockUpdateResponse represents a stock update response with previous quantity
+type StockUpdateResponse struct {
+	ID          string  `json:"id"`
+	SKU         string  `json:"sku"`
+	Name        string  `json:"name"`
+	Quantity    int     `json:"quantity"`
+	PreviousQty int     `json:"previous_quantity"`
+	UpdatedAt   string  `json:"updated_at"`
+}
 
 // InventoryHTTPHandler handles HTTP requests for inventory operations
 type InventoryHTTPHandler struct {
-	inventoryService *service.InventoryService
+	inventoryUsecase usecase.InventoryUsecase
 }
 
 // NewInventoryHTTPHandler creates a new InventoryHTTPHandler
-func NewInventoryHTTPHandler(inventoryService *service.InventoryService) *InventoryHTTPHandler {
+func NewInventoryHTTPHandler(inventoryUsecase usecase.InventoryUsecase) *InventoryHTTPHandler {
 	return &InventoryHTTPHandler{
-		inventoryService: inventoryService,
+		inventoryUsecase: inventoryUsecase,
 	}
 }
 
@@ -36,31 +44,17 @@ func (h *InventoryHTTPHandler) CreateInventory(w http.ResponseWriter, r *http.Re
 
 	var req dto.CreateInventoryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		h.sendError(w, apperrors.ErrValidationErr.WithDetails("Invalid request body"))
 		return
 	}
 
-	inv := &model.Inventory{
-		ID:          generateID(),
-		SKU:         req.SKU,
-		Name:        req.Name,
-		Description: req.Description,
-		Quantity:    req.Quantity,
-		Unit:        req.Unit,
-		Location:    req.Location,
-		MinStock:    req.MinStock,
-		MaxStock:    req.MaxStock,
-		Price:       req.Price,
-	}
-
-	result, err := h.inventoryService.CreateInventory(r.Context(), inv)
+	result, err := h.inventoryUsecase.CreateInventory(r.Context(), req)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	response := h.toInventoryResponse(result)
-	h.sendSuccess(w, "Inventory item created successfully", response, http.StatusCreated)
+	h.sendSuccess(w, "Inventory item created successfully", result, http.StatusCreated)
 }
 
 // GetInventory handles GET /api/inventory/{id}
@@ -77,14 +71,13 @@ func (h *InventoryHTTPHandler) GetInventory(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	result, err := h.inventoryService.GetInventory(r.Context(), id)
+	result, err := h.inventoryUsecase.GetInventory(r.Context(), id)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	response := h.toInventoryResponse(result)
-	h.sendSuccess(w, "Inventory item retrieved successfully", response, http.StatusOK)
+	h.sendSuccess(w, "Inventory item retrieved successfully", result, http.StatusOK)
 }
 
 // UpdateInventory handles PUT /api/inventory/{id}
@@ -103,32 +96,13 @@ func (h *InventoryHTTPHandler) UpdateInventory(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Override ID from path if not provided in body
-	if req.ID == "" {
-		req.ID = id
-	}
-
-	inv := &model.Inventory{
-		ID:          req.ID,
-		SKU:         req.SKU,
-		Name:        req.Name,
-		Description: req.Description,
-		Quantity:    req.Quantity,
-		Unit:        req.Unit,
-		Location:    req.Location,
-		MinStock:    req.MinStock,
-		MaxStock:    req.MaxStock,
-		Price:       req.Price,
-	}
-
-	result, err := h.inventoryService.UpdateInventory(r.Context(), inv)
+	result, err := h.inventoryUsecase.UpdateInventory(r.Context(), id, req)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	response := h.toInventoryResponse(result)
-	h.sendSuccess(w, "Inventory item updated successfully", response, http.StatusOK)
+	h.sendSuccess(w, "Inventory item updated successfully", result, http.StatusOK)
 }
 
 // DeleteInventory handles DELETE /api/inventory/{id}
@@ -145,7 +119,7 @@ func (h *InventoryHTTPHandler) DeleteInventory(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := h.inventoryService.DeleteInventory(r.Context(), id); err != nil {
+	if err := h.inventoryUsecase.DeleteInventory(r.Context(), id); err != nil {
 		h.sendError(w, err)
 		return
 	}
@@ -161,7 +135,10 @@ func (h *InventoryHTTPHandler) ListInventory(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Parse query parameters
-	filter := &model.InventoryFilter{}
+	filter := repository.InventoryFilter{
+		Limit:  20,
+		Offset: 0,
+	}
 
 	if sku := r.URL.Query().Get("sku"); sku != "" {
 		filter.SKU = &sku
@@ -193,21 +170,13 @@ func (h *InventoryHTTPHandler) ListInventory(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	result, err := h.inventoryService.ListInventory(r.Context(), filter)
+	result, err := h.inventoryUsecase.ListInventory(r.Context(), filter)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	response := &dto.InventoryListResponse{
-		Items:      h.toInventoryResponseList(result.Items),
-		Total:      result.Total,
-		Limit:      result.Limit,
-		Offset:     result.Offset,
-		TotalPages: result.TotalPages,
-	}
-
-	h.sendSuccess(w, "Inventory items retrieved successfully", response, http.StatusOK)
+	h.sendSuccess(w, "Inventory items retrieved successfully", result, http.StatusOK)
 }
 
 // UpdateStock handles PUT /api/inventory/{id}/stock
@@ -230,26 +199,26 @@ func (h *InventoryHTTPHandler) UpdateStock(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Get current inventory for response
-	current, _ := h.inventoryService.GetInventory(r.Context(), id)
+	// Get current inventory for previous quantity
+	current, _ := h.inventoryUsecase.GetInventory(r.Context(), id)
 	previousQty := 0
 	if current != nil {
 		previousQty = current.Quantity
 	}
 
-	result, err := h.inventoryService.UpdateStock(r.Context(), id, req.Quantity)
+	result, err := h.inventoryUsecase.UpdateStock(r.Context(), id, req.Quantity)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	response := &dto.StockUpdateResponse{
+	response := StockUpdateResponse{
 		ID:          result.ID,
 		SKU:         result.SKU,
 		Name:        result.Name,
 		Quantity:    result.Quantity,
 		PreviousQty: previousQty,
-		UpdatedAt:   result.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:   result.UpdatedAt,
 	}
 
 	h.sendSuccess(w, "Stock quantity updated successfully", response, http.StatusOK)
@@ -275,54 +244,29 @@ func (h *InventoryHTTPHandler) AdjustStock(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Get current inventory for response
-	current, _ := h.inventoryService.GetInventory(r.Context(), id)
+	// Get current inventory for previous quantity
+	current, _ := h.inventoryUsecase.GetInventory(r.Context(), id)
 	previousQty := 0
 	if current != nil {
 		previousQty = current.Quantity
 	}
 
-	result, err := h.inventoryService.AdjustStock(r.Context(), id, req.Adjustment)
+	result, err := h.inventoryUsecase.AdjustStock(r.Context(), id, req.Quantity)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	response := &dto.StockUpdateResponse{
+	response := StockUpdateResponse{
 		ID:          result.ID,
 		SKU:         result.SKU,
 		Name:        result.Name,
 		Quantity:    result.Quantity,
 		PreviousQty: previousQty,
-		UpdatedAt:   result.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:   result.UpdatedAt,
 	}
 
 	h.sendSuccess(w, "Stock quantity adjusted successfully", response, http.StatusOK)
-}
-
-func (h *InventoryHTTPHandler) toInventoryResponse(inv *model.Inventory) *dto.InventoryResponse {
-	return &dto.InventoryResponse{
-		ID:          inv.ID,
-		SKU:         inv.SKU,
-		Name:        inv.Name,
-		Description: inv.Description,
-		Quantity:    inv.Quantity,
-		Unit:        inv.Unit,
-		Location:    inv.Location,
-		MinStock:    inv.MinStock,
-		MaxStock:    inv.MaxStock,
-		Price:       inv.Price,
-		CreatedAt:   inv.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:   inv.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-	}
-}
-
-func (h *InventoryHTTPHandler) toInventoryResponseList(inventories []*model.Inventory) []*dto.InventoryResponse {
-	result := make([]*dto.InventoryResponse, len(inventories))
-	for i, inv := range inventories {
-		result[i] = h.toInventoryResponse(inv)
-	}
-	return result
 }
 
 func (h *InventoryHTTPHandler) sendSuccess(w http.ResponseWriter, message string, data interface{}, statusCode int) {
@@ -359,11 +303,6 @@ func (h *InventoryHTTPHandler) sendError(w http.ResponseWriter, err error) {
 		},
 	}
 	json.NewEncoder(w).Encode(response)
-}
-
-// generateID generates a new unique ID
-func generateID() string {
-	return uuid.New().String()
 }
 
 // extractIDFromPath extracts the ID from a URL path like /api/inventory/{id}

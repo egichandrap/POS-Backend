@@ -2,8 +2,11 @@
 package jwt
 
 import (
+	"context"
 	"time"
 
+	"github.com/example/jwt-ddd-clean/internal/application/dto"
+	"github.com/example/jwt-ddd-clean/internal/application/usecase"
 	"github.com/example/jwt-ddd-clean/internal/domain/model"
 	"github.com/example/jwt-ddd-clean/internal/domain/service"
 	"github.com/example/jwt-ddd-clean/internal/handler"
@@ -21,8 +24,10 @@ type Config struct {
 
 // JWT provides JWT token operations
 type JWT struct {
-	handler *handler.TokenHandler
-	config  Config
+	tokenHandler  *handler.TokenHandler
+	tokenUsecase  usecase.TokenUsecase
+	tokenService  *service.TokenService
+	config        Config
 }
 
 // New creates a new JWT instance
@@ -44,32 +49,39 @@ func New(config Config) *JWT {
 		config.RefreshTokenTTL,
 	)
 
+	// Application layer
+	tokenUsecase := usecase.NewTokenUsecase(tokenService)
+
 	// Handler layer
-	tokenHandler := handler.NewTokenHandler(tokenService, &handler.UserService{})
+	tokenHandler := handler.NewTokenHandler(tokenUsecase)
 
 	return &JWT{
-		handler: tokenHandler,
-		config:  config,
+		tokenHandler: tokenHandler,
+		tokenUsecase: tokenUsecase,
+		tokenService: tokenService,
+		config:       config,
 	}
 }
 
-// GenerateToken generates a new JWT token pair
-func (j *JWT) GenerateToken(username, password string) (*TokenPair, error) {
-	response, err := j.handler.GenerateToken(username, password)
+// GenerateToken generates a new JWT token pair for a user
+func (j *JWT) GenerateToken(user *model.User) (*TokenPair, error) {
+	ctx := context.Background()
+	tokenPair, err := j.tokenUsecase.GenerateTokens(ctx, user)
 	if err != nil {
 		return nil, err
 	}
 
 	return &TokenPair{
-		AccessToken:  response.AccessToken,
-		RefreshToken: response.RefreshToken,
-		ExpiresIn:    response.ExpiresIn,
+		AccessToken:  tokenPair.Token,
+		RefreshToken: "", // Use RefreshToken endpoint for refresh token
+		ExpiresIn:    tokenPair.ExpiresIn,
 	}, nil
 }
 
 // ValidateToken validates a JWT token
 func (j *JWT) ValidateToken(token string) (*TokenClaims, error) {
-	response, err := j.handler.ValidateToken(token)
+	ctx := context.Background()
+	response, err := j.tokenHandler.ValidateToken(ctx, token)
 	if err != nil {
 		return nil, err
 	}
@@ -87,21 +99,23 @@ func (j *JWT) ValidateToken(token string) (*TokenClaims, error) {
 
 // RefreshToken refreshes an expired access token
 func (j *JWT) RefreshToken(refreshToken string) (*TokenPair, error) {
-	response, err := j.handler.RefreshToken(refreshToken)
+	ctx := context.Background()
+	response, err := j.tokenHandler.RefreshToken(ctx, refreshToken)
 	if err != nil {
 		return nil, err
 	}
 
 	return &TokenPair{
-		AccessToken:  response.AccessToken,
-		RefreshToken: response.RefreshToken,
+		AccessToken:  response.Token,
+		RefreshToken: "",
 		ExpiresIn:    response.ExpiresIn,
 	}, nil
 }
 
 // RevokeToken revokes a token
 func (j *JWT) RevokeToken(token string) error {
-	return j.handler.RevokeToken(token)
+	ctx := context.Background()
+	return j.tokenHandler.RevokeToken(ctx, token)
 }
 
 // TokenPair represents access and refresh tokens
@@ -117,6 +131,9 @@ type TokenClaims struct {
 	Username string
 	Role     string
 }
+
+// TokenResponse represents token response
+type TokenResponse = dto.TokenResponse
 
 // ErrInvalidToken is returned when a token is invalid
 var ErrInvalidToken = model.ErrInvalidToken

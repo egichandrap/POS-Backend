@@ -29,3 +29,7 @@ Thumbs.db
 *.test
 *.out
 coverage.out
+
+docs/architecture.md
+docs/code-standards.md
+docs/layers/

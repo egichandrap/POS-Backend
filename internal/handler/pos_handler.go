@@ -5,23 +5,23 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/example/jwt-ddd-clean/internal/dto"
+	"github.com/example/jwt-ddd-clean/internal/application/dto"
+	"github.com/example/jwt-ddd-clean/internal/application/usecase"
 	"github.com/example/jwt-ddd-clean/internal/domain/model"
 	"github.com/example/jwt-ddd-clean/internal/domain/repository"
-	"github.com/example/jwt-ddd-clean/internal/domain/service"
 	"github.com/example/jwt-ddd-clean/internal/pkg/errors"
 	"github.com/gorilla/mux"
 )
 
 // POSHandler handles Point of Sale HTTP requests
 type POSHandler struct {
-	posService *service.POSService
+	posUsecase usecase.POSUsecase
 }
 
 // NewPOSHandler creates a new POSHandler
-func NewPOSHandler(posService *service.POSService) *POSHandler {
+func NewPOSHandler(posUsecase usecase.POSUsecase) *POSHandler {
 	return &POSHandler{
-		posService: posService,
+		posUsecase: posUsecase,
 	}
 }
 
@@ -37,13 +37,13 @@ func (h *POSHandler) CreateCart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cart, err := h.posService.CreateCart(r.Context(), userID, req.CustomerName)
+	cart, err := h.posUsecase.CreateCart(r.Context(), userID, req.CustomerName)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	h.sendJSON(w, http.StatusCreated, true, "Cart berhasil dibuat", dto.ToCartResponse(cart))
+	h.sendJSON(w, http.StatusCreated, true, "Cart berhasil dibuat", cart)
 }
 
 // GetCart retrieves a cart
@@ -51,26 +51,26 @@ func (h *POSHandler) GetCart(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	cartID := vars["id"]
 
-	cart, err := h.posService.GetCart(r.Context(), cartID)
+	cart, err := h.posUsecase.GetCart(r.Context(), cartID)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	h.sendJSON(w, http.StatusOK, true, "Berhasil mengambil cart", dto.ToCartResponse(cart))
+	h.sendJSON(w, http.StatusOK, true, "Berhasil mengambil cart", cart)
 }
 
 // GetOrCreateCart gets existing cart or creates new one
 func (h *POSHandler) GetOrCreateCart(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value("user_id").(string)
 
-	cart, err := h.posService.GetOrCreateCart(r.Context(), userID)
+	cart, err := h.posUsecase.GetOrCreateCart(r.Context(), userID)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	h.sendJSON(w, http.StatusOK, true, "Berhasil mengambil cart", dto.ToCartResponse(cart))
+	h.sendJSON(w, http.StatusOK, true, "Berhasil mengambil cart", cart)
 }
 
 // AddToCart adds an item to cart
@@ -89,13 +89,13 @@ func (h *POSHandler) AddToCart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cart, err := h.posService.AddToCart(r.Context(), cartID, req.ProductID, req.Quantity)
+	cart, err := h.posUsecase.AddToCart(r.Context(), cartID, req)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	h.sendJSON(w, http.StatusOK, true, "Item berhasil ditambahkan", dto.ToCartResponse(cart))
+	h.sendJSON(w, http.StatusOK, true, "Item berhasil ditambahkan", cart)
 }
 
 // RemoveFromCart removes an item from cart
@@ -111,13 +111,13 @@ func (h *POSHandler) RemoveFromCart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cart, err := h.posService.RemoveFromCart(r.Context(), cartID, req.ProductID)
+	cart, err := h.posUsecase.RemoveFromCart(r.Context(), cartID, req.ProductID)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	h.sendJSON(w, http.StatusOK, true, "Item berhasil dihapus", dto.ToCartResponse(cart))
+	h.sendJSON(w, http.StatusOK, true, "Item berhasil dihapus", cart)
 }
 
 // UpdateCartItemQuantity updates cart item quantity
@@ -131,13 +131,13 @@ func (h *POSHandler) UpdateCartItemQuantity(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	cart, err := h.posService.UpdateCartItemQuantity(r.Context(), cartID, req.ProductID, req.Quantity)
+	cart, err := h.posUsecase.UpdateCartItemQuantity(r.Context(), cartID, req)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	h.sendJSON(w, http.StatusOK, true, "Quantity berhasil diupdate", dto.ToCartResponse(cart))
+	h.sendJSON(w, http.StatusOK, true, "Quantity berhasil diupdate", cart)
 }
 
 // ClearCart clears all items from cart
@@ -145,7 +145,7 @@ func (h *POSHandler) ClearCart(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	cartID := vars["id"]
 
-	err := h.posService.ClearCart(r.Context(), cartID)
+	err := h.posUsecase.ClearCart(r.Context(), cartID)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -159,7 +159,7 @@ func (h *POSHandler) DeleteCart(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	cartID := vars["id"]
 
-	err := h.posService.DeleteCart(r.Context(), cartID)
+	err := h.posUsecase.DeleteCart(r.Context(), cartID)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -180,18 +180,15 @@ func (h *POSHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get cashier name from context
-	_, cashierName, _, _ := r.Context().Value("user_id").(string), r.Context().Value("username").(string), "", false
+	cashierName, _ := r.Context().Value("username").(string)
 
-	transaction, err := h.posService.Checkout(r.Context(), cartID, req.PaymentMethod, req.PaymentAmount, req.CustomerName, req.Notes)
+	transaction, err := h.posUsecase.Checkout(r.Context(), cartID, req, cashierName)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	// Update cashier name
-	transaction.CashierName = cashierName
-
-	h.sendJSON(w, http.StatusCreated, true, "Checkout berhasil", dto.ToTransactionResponse(transaction))
+	h.sendJSON(w, http.StatusCreated, true, "Checkout berhasil", transaction)
 }
 
 // GetTransaction retrieves a transaction
@@ -199,13 +196,13 @@ func (h *POSHandler) GetTransaction(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	transactionID := vars["id"]
 
-	transaction, err := h.posService.GetTransaction(r.Context(), transactionID)
+	transaction, err := h.posUsecase.GetTransaction(r.Context(), transactionID)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	h.sendJSON(w, http.StatusOK, true, "Berhasil mengambil transaksi", dto.ToTransactionResponse(transaction))
+	h.sendJSON(w, http.StatusOK, true, "Berhasil mengambil transaksi", transaction)
 }
 
 // ListTransactions lists transactions with pagination
@@ -235,24 +232,10 @@ func (h *POSHandler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 		Offset:        offset,
 	}
 
-	result, err := h.posService.ListTransactions(r.Context(), filter)
+	response, err := h.posUsecase.ListTransactions(r.Context(), filter)
 	if err != nil {
 		h.sendError(w, err)
 		return
-	}
-
-	transactions := make([]dto.TransactionResponse, len(result.Transactions))
-	for i, t := range result.Transactions {
-		resp := dto.ToTransactionResponse(t)
-		transactions[i] = *resp
-	}
-
-	response := dto.TransactionListResponse{
-		Transactions: transactions,
-		Total:        result.Total,
-		Limit:        result.Limit,
-		Offset:       result.Offset,
-		TotalPages:   result.TotalPages,
 	}
 
 	h.sendJSON(w, http.StatusOK, true, "Berhasil mengambil daftar transaksi", response)
@@ -260,7 +243,7 @@ func (h *POSHandler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 
 // GetTodaySales retrieves today's sales summary
 func (h *POSHandler) GetTodaySales(w http.ResponseWriter, r *http.Request) {
-	sales, err := h.posService.GetTodaySales(r.Context())
+	sales, err := h.posUsecase.GetTodaySales(r.Context())
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -274,13 +257,13 @@ func (h *POSHandler) CancelTransaction(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	transactionID := vars["id"]
 
-	transaction, err := h.posService.CancelTransaction(r.Context(), transactionID)
+	transaction, err := h.posUsecase.CancelTransaction(r.Context(), transactionID)
 	if err != nil {
 		h.sendError(w, err)
 		return
 	}
 
-	h.sendJSON(w, http.StatusOK, true, "Transaksi berhasil dibatalkan", dto.ToTransactionResponse(transaction))
+	h.sendJSON(w, http.StatusOK, true, "Transaksi berhasil dibatalkan", transaction)
 }
 
 // Helper methods

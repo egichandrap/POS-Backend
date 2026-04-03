@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/example/jwt-ddd-clean/internal/domain/model"
@@ -12,9 +11,9 @@ import (
 
 // POSService handles Point of Sale business logic
 type POSService struct {
-	cartRepo       repository.CartRepository
+	cartRepo        repository.CartRepository
 	transactionRepo repository.TransactionRepository
-	inventoryRepo  repository.InventoryRepository
+	inventoryRepo   repository.InventoryRepository
 }
 
 // NewPOSService creates a new POSService
@@ -24,18 +23,18 @@ func NewPOSService(
 	inventoryRepo repository.InventoryRepository,
 ) *POSService {
 	return &POSService{
-		cartRepo:       cartRepo,
+		cartRepo:        cartRepo,
 		transactionRepo: transactionRepo,
-		inventoryRepo:  inventoryRepo,
+		inventoryRepo:   inventoryRepo,
 	}
 }
 
 // CreateCart creates a new shopping cart
 func (s *POSService) CreateCart(ctx context.Context, userID, customerName string) (*model.Cart, error) {
-	cart := model.NewCart(userID, customerName)
-	
-	// Generate ID (UUID)
-	cart.ID = fmt.Sprintf("cart-%d", time.Now().UnixNano())
+	cart, err := model.NewCart(userID, customerName)
+	if err != nil {
+		return nil, errors.NewValidationError(err.Error())
+	}
 
 	if err := s.cartRepo.Create(ctx, cart); err != nil {
 		return nil, errors.NewInternalError("gagal membuat cart")
@@ -78,12 +77,14 @@ func (s *POSService) AddToCart(ctx context.Context, cartID, productID string, qu
 	}
 
 	// Check stock
-	if product.Quantity < quantity {
-		return nil, errors.NewValidationError("stok tidak mencukupi untuk produk %s", product.Name)
+	if product.Quantity() < quantity {
+		return nil, errors.NewValidationError("stok tidak mencukupi untuk produk %s", product.Name())
 	}
 
 	// Add item to cart
-	cart.AddItem(product.ID, product.Name, product.SKU, quantity, product.Price)
+	if err := cart.AddItem(product.ID(), product.Name(), product.SKU(), quantity, product.Price()); err != nil {
+		return nil, errors.NewValidationError(err.Error())
+	}
 
 	if err := s.cartRepo.Update(ctx, cart); err != nil {
 		return nil, errors.NewInternalError("gagal menambahkan item ke cart")
@@ -132,8 +133,8 @@ func (s *POSService) UpdateCartItemQuantity(ctx context.Context, cartID, product
 			return nil, errors.NewNotFoundError("produk", "id", productID)
 		}
 
-		if product.Quantity < quantity {
-			return nil, errors.NewValidationError("stok tidak mencukupi untuk produk %s", product.Name)
+		if product.Quantity() < quantity {
+			return nil, errors.NewValidationError("stok tidak mencukupi untuk produk %s", product.Name())
 		}
 	}
 
@@ -185,7 +186,7 @@ func (s *POSService) Checkout(ctx context.Context, cartID string, paymentMethod 
 	}
 
 	// Validate cart is not empty
-	if len(cart.Items) == 0 {
+	if len(cart.Items()) == 0 {
 		return nil, errors.NewValidationError("cart kosong")
 	}
 
@@ -196,33 +197,35 @@ func (s *POSService) Checkout(ctx context.Context, cartID string, paymentMethod 
 	}
 
 	// Get cashier info (from context - we'll pass this as parameter)
-	// For now, we'll get from cart's UserID
-	cashierID := cart.UserID
+	cashierID := cart.UserID()
 	cashierName := "" // Will be set from user service
 
 	// Create transaction
-	transaction := model.NewTransaction(transactionNo, cashierID, cashierName)
-	transaction.CustomerName = customerName
-	transaction.Notes = notes
+	transaction, err := model.NewTransaction(transactionNo, cashierID, cashierName)
+	if err != nil {
+		return nil, errors.NewInternalError("gagal membuat transaksi")
+	}
+	transaction.SetCustomerName(customerName)
+	transaction.SetNotes(notes)
 
 	// Add items to transaction and update inventory
-	for _, item := range cart.Items {
+	for _, item := range cart.Items() {
 		// Validate stock again
-		product, err := s.inventoryRepo.GetByID(ctx, item.ProductID)
+		product, err := s.inventoryRepo.GetByID(ctx, item.ProductID())
 		if err != nil {
-			return nil, errors.NewNotFoundError("produk", "id", item.ProductID)
+			return nil, errors.NewNotFoundError("produk", "id", item.ProductID())
 		}
 
-		if product.Quantity < item.Quantity {
-			return nil, errors.NewValidationError("stok tidak mencukupi untuk produk %s", product.Name)
+		if product.Quantity() < item.Quantity() {
+			return nil, errors.NewValidationError("stok tidak mencukupi untuk produk %s", product.Name())
 		}
 
-		transaction.AddItem(item.ProductID, item.ProductName, item.SKU, item.Quantity, item.UnitPrice)
+		transaction.AddItem(item.ProductID(), item.ProductName(), item.SKU(), item.Quantity(), item.UnitPrice())
 
 		// Update inventory
-		newQty := product.Quantity - item.Quantity
-		if err := s.inventoryRepo.UpdateQuantity(ctx, product.ID, newQty); err != nil {
-			return nil, errors.NewInternalError("gagal mengupdate stok produk %s", product.Name)
+		newQty := product.Quantity() - item.Quantity()
+		if err := s.inventoryRepo.UpdateQuantity(ctx, product.ID(), newQty); err != nil {
+			return nil, errors.NewInternalError("gagal mengupdate stok produk %s", product.Name())
 		}
 	}
 
@@ -230,23 +233,24 @@ func (s *POSService) Checkout(ctx context.Context, cartID string, paymentMethod 
 	transaction.ApplyTax(11)
 
 	// Process payment
-	if err := transaction.ProcessPayment(paymentMethod, paymentAmount); err != nil {
+	if err := transaction.Complete(paymentMethod, paymentAmount); err != nil {
 		// Rollback inventory
-		s.rollbackInventory(ctx, cart.Items)
+		s.rollbackInventory(ctx, cart.Items())
 		return nil, errors.NewValidationError("pembayaran tidak mencukupi")
 	}
 
 	// Save transaction
 	if err := s.transactionRepo.Create(ctx, transaction); err != nil {
 		// Rollback inventory
-		s.rollbackInventory(ctx, cart.Items)
+		s.rollbackInventory(ctx, cart.Items())
 		return nil, errors.NewInternalError("gagal menyimpan transaksi")
 	}
 
 	// Clear and delete cart
 	cart.Clear()
 	s.cartRepo.Update(ctx, cart)
-	s.cartRepo.Delete(ctx, cart.ID)
+	cartIDVal := cart.ID()
+	s.cartRepo.Delete(ctx, cartIDVal)
 
 	return transaction, nil
 }
@@ -254,10 +258,10 @@ func (s *POSService) Checkout(ctx context.Context, cartID string, paymentMethod 
 // rollbackInventory rolls back inventory updates (in case of failure)
 func (s *POSService) rollbackInventory(ctx context.Context, items []model.CartItem) {
 	for _, item := range items {
-		product, err := s.inventoryRepo.GetByID(ctx, item.ProductID)
+		product, err := s.inventoryRepo.GetByID(ctx, item.ProductID())
 		if err == nil {
-			newQty := product.Quantity + item.Quantity
-			s.inventoryRepo.UpdateQuantity(ctx, product.ID, newQty)
+			newQty := product.Quantity() + item.Quantity()
+			s.inventoryRepo.UpdateQuantity(ctx, product.ID(), newQty)
 		}
 	}
 }
@@ -292,17 +296,17 @@ func (s *POSService) GetTodaySales(ctx context.Context) (map[string]interface{},
 	totalItems := 0
 
 	for _, t := range transactions {
-		if t.Status == model.TransactionCompleted {
-			totalSales += t.TotalAmount
-			totalItems += len(t.Items)
+		if t.Status() == model.TransactionCompleted {
+			totalSales += t.TotalAmount()
+			totalItems += len(t.Items())
 		}
 	}
 
 	return map[string]interface{}{
-		"total_sales":       totalSales,
+		"total_sales":        totalSales,
 		"total_transactions": totalTransactions,
-		"total_items":       totalItems,
-		"date":              startOfDay.Format("2006-01-02"),
+		"total_items":        totalItems,
+		"date":               startOfDay.Format("2006-01-02"),
 	}, nil
 }
 
@@ -313,16 +317,16 @@ func (s *POSService) CancelTransaction(ctx context.Context, transactionID string
 		return nil, errors.NewNotFoundError("transaksi", "id", transactionID)
 	}
 
-	if transaction.Status != model.TransactionCompleted {
+	if transaction.Status() != model.TransactionCompleted {
 		return nil, errors.NewValidationError("hanya transaksi yang sudah selesai yang bisa dibatalkan")
 	}
 
 	// Restore inventory
-	for _, item := range transaction.Items {
-		product, err := s.inventoryRepo.GetByID(ctx, item.ProductID)
+	for _, item := range transaction.Items() {
+		product, err := s.inventoryRepo.GetByID(ctx, item.ProductID())
 		if err == nil {
-			newQty := product.Quantity + item.Quantity
-			s.inventoryRepo.UpdateQuantity(ctx, product.ID, newQty)
+			newQty := product.Quantity() + item.Quantity()
+			s.inventoryRepo.UpdateQuantity(ctx, product.ID(), newQty)
 		}
 	}
 

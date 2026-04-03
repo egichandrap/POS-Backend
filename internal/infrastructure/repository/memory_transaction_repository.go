@@ -30,7 +30,7 @@ func (r *MemoryTransactionRepository) Create(ctx context.Context, transaction *m
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.transactions[transaction.ID] = transaction
+	r.transactions[transaction.ID()] = transaction
 	return nil
 }
 
@@ -53,7 +53,7 @@ func (r *MemoryTransactionRepository) GetByTransactionNo(ctx context.Context, tr
 	defer r.mu.RUnlock()
 
 	for _, t := range r.transactions {
-		if t.TransactionNo == transactionNo {
+		if t.TransactionNo() == transactionNo {
 			return t, nil
 		}
 	}
@@ -66,7 +66,7 @@ func (r *MemoryTransactionRepository) Update(ctx context.Context, transaction *m
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.transactions[transaction.ID] = transaction
+	r.transactions[transaction.ID()] = transaction
 	return nil
 }
 
@@ -116,9 +116,6 @@ func (r *MemoryTransactionRepository) ListWithPagination(ctx context.Context, fi
 		}
 	}
 
-	// Sort by created_at desc (simple implementation)
-	// In production, use proper sorting
-
 	total := int64(len(filtered))
 
 	// Set defaults
@@ -161,7 +158,7 @@ func (r *MemoryTransactionRepository) GetByDateRange(ctx context.Context, startD
 
 	var result []*model.Transaction
 	for _, t := range r.transactions {
-		if t.CreatedAt.After(startDate) && t.CreatedAt.Before(endDate) {
+		if t.CreatedAt().After(startDate) && t.CreatedAt().Before(endDate) {
 			result = append(result, t)
 		}
 	}
@@ -176,7 +173,7 @@ func (r *MemoryTransactionRepository) GetByCashierID(ctx context.Context, cashie
 
 	var result []*model.Transaction
 	for _, t := range r.transactions {
-		if t.CashierID == cashierID {
+		if t.CashierID() == cashierID {
 			result = append(result, t)
 			if len(result) >= limit {
 				break
@@ -201,23 +198,23 @@ func (r *MemoryTransactionRepository) GenerateTransactionNo(ctx context.Context)
 
 // matchesFilter checks if a transaction matches the filter
 func matchesFilter(t *model.Transaction, filter repository.TransactionFilter) bool {
-	if filter.Status != "" && t.Status != filter.Status {
+	if filter.Status != "" && t.Status() != filter.Status {
 		return false
 	}
-	if filter.PaymentMethod != "" && t.PaymentMethod != filter.PaymentMethod {
+	if filter.PaymentMethod != "" && t.PaymentMethod() != filter.PaymentMethod {
 		return false
 	}
-	if filter.CashierID != "" && t.CashierID != filter.CashierID {
+	if filter.CashierID != "" && t.CashierID() != filter.CashierID {
 		return false
 	}
-	if !filter.StartDate.IsZero() && t.CreatedAt.Before(filter.StartDate) {
+	if !filter.StartDate.IsZero() && t.CreatedAt().Before(filter.StartDate) {
 		return false
 	}
-	if !filter.EndDate.IsZero() && t.CreatedAt.After(filter.EndDate) {
+	if !filter.EndDate.IsZero() && t.CreatedAt().After(filter.EndDate) {
 		return false
 	}
 	if filter.Search != "" {
-		if t.TransactionNo != filter.Search && t.CustomerName != filter.Search {
+		if t.TransactionNo() != filter.Search && t.CustomerName() != filter.Search {
 			return false
 		}
 	}

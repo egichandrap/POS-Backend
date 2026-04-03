@@ -18,14 +18,6 @@ type TokenService struct {
 	refreshTokenTTL time.Duration
 }
 
-// JWTProvider defines the interface for JWT operations
-type JWTProvider interface {
-	GenerateToken(claims *model.TokenClaims, expiresAt time.Time) (string, error)
-	GenerateTokenWithDuration(userID, username string, role model.UserRole, expiration time.Duration) (string, error)
-	ValidateToken(token string) (*model.TokenClaims, error)
-	GetExpiration(token string) (time.Time, error)
-}
-
 // NewTokenService creates a new TokenService
 func NewTokenService(
 	tokenRepo repository.TokenRepository,
@@ -46,9 +38,9 @@ func (s *TokenService) GenerateTokens(ctx context.Context, user *model.User) (*m
 	now := time.Now()
 
 	claims := &model.TokenClaims{
-		UserID:   user.ID,
-		Username: user.Username,
-		Role:     string(user.Role),
+		UserID:   user.ID(),
+		Username: user.Username(),
+		Role:     string(user.Role()),
 	}
 
 	// Generate access token
@@ -66,7 +58,7 @@ func (s *TokenService) GenerateTokens(ctx context.Context, user *model.User) (*m
 	}
 
 	// Store refresh token for later use
-	if err := s.tokenRepo.Store(ctx, user.ID, refreshToken, "refresh", refreshExpiresAt); err != nil {
+	if err := s.tokenRepo.Store(ctx, user.ID(), refreshToken, "refresh", refreshExpiresAt); err != nil {
 		return nil, apperrors.Wrap(err, apperrors.ErrTokenStorage, "Failed to store refresh token", apperrors.ErrTokenStorageErr.GetHTTPStatus())
 	}
 
@@ -119,27 +111,26 @@ func (s *TokenService) RefreshToken(ctx context.Context, refreshToken string) (*
 		return nil, err
 	}
 
-	// Verify the refresh token exists in storage
-	isBlacklisted, err := s.tokenRepo.IsBlacklisted(ctx, refreshToken)
-	if err != nil {
-		return nil, apperrors.Wrap(err, apperrors.ErrInternal, "Failed to check refresh token status", apperrors.ErrInternalErr.GetHTTPStatus())
-	}
-	if isBlacklisted {
-		return nil, apperrors.ErrRevokedTokenErr
-	}
-
-	// Create user from claims (we don't need full user object here, just use empty role)
-	user := model.NewUser(claims.UserID, claims.Username, "", "")
-	user.ID = claims.UserID
-
 	// Blacklist the old refresh token
 	expiration, _ := s.jwtProvider.GetExpiration(refreshToken)
 	if err := s.tokenRepo.Blacklist(ctx, refreshToken, expiration); err != nil {
 		return nil, apperrors.Wrap(err, apperrors.ErrTokenStorage, "Failed to blacklist old refresh token", apperrors.ErrTokenStorageErr.GetHTTPStatus())
 	}
 
-	// Generate new token pair
-	return s.GenerateTokens(ctx, user)
+	// Generate new token pair using reconstructed user
+	reconstructedUser := model.ReconstructUser(
+		claims.UserID,
+		claims.Username,
+		"",
+		"",
+		"",
+		model.UserRole(claims.Role),
+		model.StatusActive,
+		time.Now(),
+		time.Now(),
+		nil,
+	)
+	return s.GenerateTokens(ctx, reconstructedUser)
 }
 
 // RevokeToken revokes (blacklists) a token

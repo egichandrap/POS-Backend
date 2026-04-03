@@ -13,12 +13,13 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"github.com/example/jwt-ddd-clean/internal/application/usecase"
 	"github.com/example/jwt-ddd-clean/internal/domain/repository"
 	"github.com/example/jwt-ddd-clean/internal/domain/service"
 	"github.com/example/jwt-ddd-clean/internal/handler"
 	inventoryhttp "github.com/example/jwt-ddd-clean/internal/http/inventory"
 	httpmiddleware "github.com/example/jwt-ddd-clean/internal/http/middleware"
-	infrastructurejwt "github.com/example/jwt-ddd-clean/internal/infrastructure/jwt"
+	"github.com/example/jwt-ddd-clean/internal/infrastructure/jwt"
 	infrarepo "github.com/example/jwt-ddd-clean/internal/infrastructure/repository"
 )
 
@@ -84,7 +85,7 @@ func setupRoutes(
 	// Admin routes (require admin role)
 	adminRouter := protectedRouter.PathPrefix("/admin").Subrouter()
 	adminRouter.Use(authMiddleware.RequireRole("SUPER_ADMIN", "ADMIN"))
-	
+
 	adminRouter.HandleFunc("/users", authHandler.ListUsers).Methods(http.MethodGet)
 	adminRouter.HandleFunc("/users", authHandler.CreateUser).Methods(http.MethodPost)
 	adminRouter.HandleFunc("/users/{id}", authHandler.GetUserByID).Methods(http.MethodGet)
@@ -93,11 +94,11 @@ func setupRoutes(
 
 	// Inventory routes (require authentication, admin for write operations)
 	inventoryRouter := protectedRouter.PathPrefix("/inventory").Subrouter()
-	
+
 	// Read operations - any authenticated user can read
 	inventoryRouter.HandleFunc("", inventoryHTTPHandler.ListInventory).Methods(http.MethodGet)
 	inventoryRouter.HandleFunc("/{id}", inventoryHTTPHandler.GetInventory).Methods(http.MethodGet)
-	
+
 	// Write operations - only admin/superadmin (handled in handler with context check)
 	inventoryRouter.HandleFunc("", inventoryHTTPHandler.CreateInventory).Methods(http.MethodPost)
 	inventoryRouter.HandleFunc("/{id}", inventoryHTTPHandler.UpdateInventory).Methods(http.MethodPut)
@@ -107,7 +108,7 @@ func setupRoutes(
 
 	// POS routes (require authentication)
 	posRouter := protectedRouter.PathPrefix("/pos").Subrouter()
-	
+
 	// Cart routes
 	posRouter.HandleFunc("/cart", posHandler.CreateCart).Methods(http.MethodPost)
 	posRouter.HandleFunc("/cart/my", posHandler.GetOrCreateCart).Methods(http.MethodGet)
@@ -117,13 +118,13 @@ func setupRoutes(
 	posRouter.HandleFunc("/cart/{id}/items", posHandler.RemoveFromCart).Methods(http.MethodDelete)
 	posRouter.HandleFunc("/cart/{id}/clear", posHandler.ClearCart).Methods(http.MethodPost)
 	posRouter.HandleFunc("/cart/{id}", posHandler.DeleteCart).Methods(http.MethodDelete)
-	
+
 	// Checkout & Transaction routes
 	posRouter.HandleFunc("/checkout/{id}", posHandler.Checkout).Methods(http.MethodPost)
 	posRouter.HandleFunc("/transactions", posHandler.ListTransactions).Methods(http.MethodGet)
 	posRouter.HandleFunc("/transactions/{id}", posHandler.GetTransaction).Methods(http.MethodGet)
 	posRouter.HandleFunc("/transactions/{id}/cancel", posHandler.CancelTransaction).Methods(http.MethodPost)
-	
+
 	// Sales summary
 	posRouter.HandleFunc("/sales/today", posHandler.GetTodaySales).Methods(http.MethodGet)
 
@@ -173,10 +174,54 @@ func setupRoutes(
 	}).Methods(http.MethodGet)
 }
 
+// buildApp wires all layers: infrastructure -> domain -> application -> handlers
+func buildApp(
+	tokenRepo repository.TokenRepository,
+	inventoryRepo repository.InventoryRepository,
+	userRepo repository.UserRepository,
+	cartRepo repository.CartRepository,
+	transactionRepo repository.TransactionRepository,
+	jwtProvider *jwt.Provider,
+	accessTokenTTL, refreshTokenTTL time.Duration,
+) (*TokenHTTPHandler, *inventoryhttp.InventoryHTTPHandler, *handler.AuthHandler, *handler.POSHandler, *httpmiddleware.AuthMiddleware) {
+	// Domain layer - Services
+	tokenService := service.NewTokenService(
+		tokenRepo,
+		jwtProvider,
+		accessTokenTTL,
+		refreshTokenTTL,
+	)
+
+	inventoryService := service.NewInventoryService(inventoryRepo)
+	authService := service.NewAuthService(userRepo, tokenRepo, jwtProvider)
+	posService := service.NewPOSService(cartRepo, transactionRepo, inventoryRepo)
+
+	// Application layer - Usecases
+	authUsecase := usecase.NewAuthUsecase(userRepo, tokenRepo, authService)
+	inventoryUsecase := usecase.NewInventoryUsecase(inventoryRepo, inventoryService)
+	posUsecase := usecase.NewPOSUsecase(cartRepo, transactionRepo, inventoryRepo, posService)
+	tokenUsecase := usecase.NewTokenUsecase(tokenService)
+
+	// Handler layer
+	tokenHandler := handler.NewTokenHandler(tokenUsecase)
+	tokenHTTPHandler := NewTokenHTTPHandler(tokenHandler)
+
+	inventoryHTTPHandler := inventoryhttp.NewInventoryHTTPHandler(inventoryUsecase)
+
+	authHandler := handler.NewAuthHandler(authUsecase)
+
+	posHandler := handler.NewPOSHandler(posUsecase)
+
+	// Middleware (still uses domain token service for low-level validation)
+	authMiddleware := httpmiddleware.NewAuthMiddleware(tokenService)
+
+	return tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, authMiddleware
+}
+
 // NewServer creates a new HTTP server with gorilla/mux
 func NewServer(config ServerConfig) *Server {
 	// Infrastructure layer - JWT
-	jwtProvider := infrastructurejwt.NewProvider(infrastructurejwt.Config{
+	jwtProvider := jwt.NewProvider(jwt.Config{
 		SecretKey: config.SecretKey,
 		Issuer:    config.Issuer,
 		Algorithm: "HS256",
@@ -189,33 +234,11 @@ func NewServer(config ServerConfig) *Server {
 	var cartRepo repository.CartRepository = infrarepo.NewMemoryCartRepository()
 	var transactionRepo repository.TransactionRepository = infrarepo.NewMemoryTransactionRepository()
 
-	// Domain layer - Services
-	tokenService := service.NewTokenService(
-		tokenRepo,
-		jwtProvider,
-		config.AccessTokenTTL,
-		config.RefreshTokenTTL,
+	// Build application layers
+	tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, authMiddleware := buildApp(
+		tokenRepo, inventoryRepo, userRepo, cartRepo, transactionRepo,
+		jwtProvider, config.AccessTokenTTL, config.RefreshTokenTTL,
 	)
-
-	inventoryService := service.NewInventoryService(inventoryRepo)
-	authService := service.NewAuthService(userRepo, tokenRepo, jwtProvider)
-	posService := service.NewPOSService(cartRepo, transactionRepo, inventoryRepo)
-
-	// Handler layer - Token
-	tokenHandler := handler.NewTokenHandler(tokenService, &handler.UserService{})
-	tokenHTTPHandler := NewTokenHTTPHandler(tokenHandler)
-
-	// Handler layer - Inventory
-	inventoryHTTPHandler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
-
-	// Handler layer - Auth
-	authHandler := handler.NewAuthHandler(authService)
-
-	// Handler layer - POS
-	posHandler := handler.NewPOSHandler(posService)
-
-	// Middleware
-	authMiddleware := httpmiddleware.NewAuthMiddleware(tokenService)
 
 	// Create mux router
 	r := mux.NewRouter()
@@ -241,7 +264,7 @@ func NewServer(config ServerConfig) *Server {
 // NewServerWithDatabase creates a new HTTP server with PostgreSQL database connection using gorilla/mux
 func NewServerWithDatabase(config ServerConfig, db *sql.DB) *Server {
 	// Infrastructure layer - JWT
-	jwtProvider := infrastructurejwt.NewProvider(infrastructurejwt.Config{
+	jwtProvider := jwt.NewProvider(jwt.Config{
 		SecretKey: config.SecretKey,
 		Issuer:    config.Issuer,
 		Algorithm: "HS256",
@@ -254,33 +277,11 @@ func NewServerWithDatabase(config ServerConfig, db *sql.DB) *Server {
 	var cartRepo repository.CartRepository = infrarepo.NewMemoryCartRepository() // TODO: Implement PostgreSQL cart repository
 	var transactionRepo repository.TransactionRepository = infrarepo.NewMemoryTransactionRepository() // TODO: Implement PostgreSQL transaction repository
 
-	// Domain layer - Services
-	tokenService := service.NewTokenService(
-		tokenRepo,
-		jwtProvider,
-		config.AccessTokenTTL,
-		config.RefreshTokenTTL,
+	// Build application layers
+	tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, authMiddleware := buildApp(
+		tokenRepo, inventoryRepo, userRepo, cartRepo, transactionRepo,
+		jwtProvider, config.AccessTokenTTL, config.RefreshTokenTTL,
 	)
-
-	inventoryService := service.NewInventoryService(inventoryRepo)
-	authService := service.NewAuthService(userRepo, tokenRepo, jwtProvider)
-	posService := service.NewPOSService(cartRepo, transactionRepo, inventoryRepo)
-
-	// Handler layer - Token
-	tokenHandler := handler.NewTokenHandler(tokenService, &handler.UserService{})
-	tokenHTTPHandler := NewTokenHTTPHandler(tokenHandler)
-
-	// Handler layer - Inventory
-	inventoryHTTPHandler := inventoryhttp.NewInventoryHTTPHandler(inventoryService)
-
-	// Handler layer - Auth
-	authHandler := handler.NewAuthHandler(authService)
-
-	// Handler layer - POS
-	posHandler := handler.NewPOSHandler(posService)
-
-	// Middleware
-	authMiddleware := httpmiddleware.NewAuthMiddleware(tokenService)
 
 	// Create mux router
 	r := mux.NewRouter()

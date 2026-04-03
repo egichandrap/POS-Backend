@@ -1,101 +1,35 @@
 package handler
 
 import (
-	"errors"
-	"time"
+	"context"
 
-	apperrors "github.com/example/jwt-ddd-clean/internal/pkg/errors"
-	"github.com/example/jwt-ddd-clean/internal/domain/model"
-	"github.com/example/jwt-ddd-clean/internal/domain/service"
-	"github.com/example/jwt-ddd-clean/internal/dto"
+	"github.com/example/jwt-ddd-clean/internal/application/dto"
+	"github.com/example/jwt-ddd-clean/internal/application/usecase"
 )
 
-// TokenHandler handles HTTP requests for token operations
+// TokenHandler handles token operations (non-HTTP layer)
 type TokenHandler struct {
-	tokenService *service.TokenService
-	userService  *UserService
-}
-
-// UserService is a placeholder for user authentication service
-type UserService struct {
-	// In a real application, this would interact with a user repository
+	tokenUsecase usecase.TokenUsecase
 }
 
 // NewTokenHandler creates a new TokenHandler
-func NewTokenHandler(tokenService *service.TokenService, userService *UserService) *TokenHandler {
+func NewTokenHandler(tokenUsecase usecase.TokenUsecase) *TokenHandler {
 	return &TokenHandler{
-		tokenService: tokenService,
-		userService:  userService,
+		tokenUsecase: tokenUsecase,
 	}
-}
-
-// GenerateToken handles token generation requests
-// This is a simplified version - in production, you'd validate credentials
-func (h *TokenHandler) GenerateToken(username, password string) (*dto.TokenResponse, error) {
-	// In a real application, authenticate the user first
-	user := &model.User{
-		ID:       "user-123",
-		Username: username,
-		Email:    username + "@example.com",
-		Role:     "user",
-	}
-
-	tokenPair, err := h.tokenService.GenerateTokens(nil, user)
-	if err != nil {
-		return nil, err
-	}
-
-	expiresIn := int64(time.Until(tokenPair.Access.ExpiresAt).Seconds())
-
-	return &dto.TokenResponse{
-		AccessToken:  tokenPair.Access.AccessToken,
-		RefreshToken: tokenPair.Refresh.AccessToken,
-		ExpiresIn:    expiresIn,
-		TokenType:    "Bearer",
-	}, nil
 }
 
 // RefreshToken handles token refresh requests
-func (h *TokenHandler) RefreshToken(refreshToken string) (*dto.TokenResponse, error) {
-	tokenPair, err := h.tokenService.RefreshToken(nil, refreshToken)
-	if err != nil {
-		return nil, err
-	}
-
-	expiresIn := int64(time.Until(tokenPair.Access.ExpiresAt).Seconds())
-
-	return &dto.TokenResponse{
-		AccessToken:  tokenPair.Access.AccessToken,
-		RefreshToken: tokenPair.Refresh.AccessToken,
-		ExpiresIn:    expiresIn,
-		TokenType:    "Bearer",
-	}, nil
+func (h *TokenHandler) RefreshToken(ctx context.Context, refreshToken string) (*dto.TokenResponse, error) {
+	return h.tokenUsecase.RefreshToken(ctx, refreshToken)
 }
 
 // ValidateToken handles token validation requests
-func (h *TokenHandler) ValidateToken(token string) (*dto.ValidateTokenResponse, error) {
-	claims, err := h.tokenService.ValidateToken(nil, token)
-	if err != nil {
-		var appErr *apperrors.AppError
-		if errors.As(err, &appErr) {
-			if appErr.Code == apperrors.ErrInvalidToken || appErr.Code == apperrors.ErrExpiredToken {
-				return &dto.ValidateTokenResponse{
-					Valid: false,
-				}, nil
-			}
-		}
-		return nil, err
-	}
-
-	return &dto.ValidateTokenResponse{
-		Valid:    true,
-		UserID:   claims.UserID,
-		Username: claims.Username,
-		Role:     claims.Role,
-	}, nil
+func (h *TokenHandler) ValidateToken(ctx context.Context, token string) (*dto.TokenValidationResponse, error) {
+	return h.tokenUsecase.ValidateToken(ctx, token)
 }
 
 // RevokeToken handles token revocation requests
-func (h *TokenHandler) RevokeToken(token string) error {
-	return h.tokenService.RevokeToken(nil, token)
+func (h *TokenHandler) RevokeToken(ctx context.Context, token string) error {
+	return h.tokenUsecase.RevokeToken(ctx, token)
 }

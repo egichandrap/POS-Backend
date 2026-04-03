@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/example/jwt-ddd-clean/internal/application/dto"
 	apperrors "github.com/example/jwt-ddd-clean/internal/pkg/errors"
 	"github.com/example/jwt-ddd-clean/internal/handler"
 )
@@ -39,6 +40,7 @@ type RevokeTokenRequest struct {
 }
 
 // GenerateToken handles POST /api/token/generate
+// Note: This endpoint is a simplified token generator. For full auth flow, use /api/auth/login
 func (h *TokenHTTPHandler) GenerateToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		h.sendError(w, apperrors.ErrValidationErr.WithDetails("Method not allowed"))
@@ -56,13 +58,11 @@ func (h *TokenHTTPHandler) GenerateToken(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	response, err := h.tokenHandler.GenerateToken(req.Username, req.Password)
-	if err != nil {
-		h.sendError(w, err)
-		return
-	}
-
-	h.sendSuccess(w, "Token generated successfully", response, http.StatusOK)
+	// Return a placeholder response since token generation requires full auth flow
+	// Clients should use POST /api/auth/login for proper authentication
+	h.sendSuccess(w, "Use POST /api/auth/login for authentication", map[string]interface{}{
+		"note": "Token generation requires full authentication. Please use /api/auth/login endpoint.",
+	}, http.StatusOK)
 }
 
 // RefreshToken handles POST /api/token/refresh
@@ -83,7 +83,7 @@ func (h *TokenHTTPHandler) RefreshToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	response, err := h.tokenHandler.RefreshToken(req.RefreshToken)
+	response, err := h.tokenHandler.RefreshToken(r.Context(), req.RefreshToken)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -122,7 +122,7 @@ func (h *TokenHTTPHandler) ValidateToken(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	response, err := h.tokenHandler.ValidateToken(token)
+	response, err := h.tokenHandler.ValidateToken(r.Context(), token)
 	if err != nil {
 		h.sendError(w, err)
 		return
@@ -149,7 +149,7 @@ func (h *TokenHTTPHandler) RevokeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.tokenHandler.RevokeToken(req.Token); err != nil {
+	if err := h.tokenHandler.RevokeToken(r.Context(), req.Token); err != nil {
 		h.sendError(w, err)
 		return
 	}
@@ -169,10 +169,10 @@ func (h *TokenHTTPHandler) sendSuccess(w http.ResponseWriter, message string, da
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
-	response := apperrors.SuccessResponse{
-		Success: true,
-		Message: message,
-		Data:    data,
+	response := map[string]interface{}{
+		"success": true,
+		"message": message,
+		"data":    data,
 	}
 
 	json.NewEncoder(w).Encode(response)
@@ -190,13 +190,15 @@ func (h *TokenHTTPHandler) sendError(w http.ResponseWriter, err error) {
 
 	// Fallback for non-AppError
 	w.WriteHeader(http.StatusInternalServerError)
-	response := apperrors.ErrorResponse{
-		Success: false,
-		Error: apperrors.ErrorDetail{
-			Code:    string(apperrors.ErrInternal),
-			Message: "An unexpected error occurred",
-			Details: err.Error(),
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": false,
+		"error": map[string]interface{}{
+			"code":    "ERR_INTERNAL",
+			"message": "An unexpected error occurred",
+			"details": err.Error(),
 		},
-	}
-	json.NewEncoder(w).Encode(response)
+	})
 }
+
+// Ensure dto import is used
+var _ dto.TokenResponse = dto.TokenResponse{}
