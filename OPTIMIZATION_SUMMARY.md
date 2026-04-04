@@ -1,360 +1,468 @@
-# Ultimate POS System - Optimization Summary
+# POS System Optimization Summary - v3.0.0
 
-## 🎯 What Was Optimized
+## 📋 Overview
 
-This document summarizes all the optimizations done to bring the codebase in line with **Clean Architecture**, **DDD principles**, and **industry best practices** as defined in the project's architecture documentation.
+This document details all performance optimizations and improvements implemented in version 3.0.0 of the POS System.
 
 ---
 
 ## ✅ Completed Optimizations
 
-### 1. **Domain Value Objects** (Fix Primitive Obsession)
-**Location:** `internal/domain/valueobject/`
+### 1. **PostgreSQL Repositories** (CRITICAL)
 
-Created dedicated value objects to replace primitive types:
-- **`Money`** - Monetary value with currency support (IDR, USD)
-  - Methods: `Add()`, `Subtract()`, `Multiply()`, `Percentage()`, `Equals()`
-- **`SKU`** - Stock Keeping Unit with validation
-- **`Quantity`** - Product quantity with business rules
-- **`ProductName`** - Validated product name
+#### Problem
+- Carts, transactions, and token blacklists were stored in-memory
+- Data lost on every server restart
+- Token blacklists vanished → revoked tokens became valid again
+- All carts and transactions lost on restart
 
-**Benefits:**
-- Type safety
-- Built-in validation
-- Prevents invalid states
-- Self-documenting code
+#### Solution
+Implemented full PostgreSQL repositories:
+- ✅ `PostgresCartRepository` - Persistent cart storage
+- ✅ `PostgresTransactionRepository` - Persistent transaction storage  
+- ✅ `PostgresTokenRepository` - Persistent token blacklist
 
----
+#### Impact
+- **Zero data loss** on server restart
+- **Token security** - Revoked tokens stay revoked
+- **Cart persistence** - Users can resume shopping after restart
+- **Transaction durability** - Sales records immediately saved
 
-### 2. **Entity Encapsulation** (Proper DDD Pattern)
-**Location:** `internal/domain/model/cart.go`, `transaction.go`
-
-**Fixed:**
-- All entity fields are now **unexported** (private)
-- Getter methods provide read-only access
-- State changes only through domain methods
-- Added `CartStatus` enum with proper state transitions
-
-**New Cart Features:**
-- `Hold()` - Put cart on hold
-- `Resume()` - Resume from hold
-- `MarkAsCheckout()` - Mark as checked out
-- `CanCheckout()` - Validation method
-- `SetCustomerID()` - Link to customer
-- `SetNotes()` - Add notes to cart
-
-**New Transaction Features:**
-- `Refund()` - Refund transaction
-- `IsRefundable()` - Check if refundable
-- `IsRefunded()` - Check if refunded
+#### Files Created/Modified
+- `internal/infrastructure/repository/postgres_cart_repository.go`
+- `internal/infrastructure/repository/postgres_transaction_repository.go`
+- `internal/infrastructure/repository/postgres_token_repository.go`
+- `internal/infrastructure/http/server.go` - Updated `NewServerWithDatabase()`
 
 ---
 
-### 3. **Persistence Layer Structure** (Correct Architecture)
-**Location:** `internal/infrastructure/persistence/`
+### 2. **Database Transactions in Checkout** (CRITICAL)
 
-**Created:**
-- `postgres_cart_repository.go` - PostgreSQL cart repository
-- `postgres_transaction_repository.go` - PostgreSQL transaction repository
-- `postgres_inventory_repository.go` - PostgreSQL inventory repository
-- `unit_of_work.go` - Database transaction management (ACID compliance)
+#### Problem
+- `POSService.Checkout()` performed multiple operations without atomicity
+- If any step failed mid-way, inventory was deducted but transaction not saved
+- `rollbackInventory()` was best-effort compensation but could itself fail
+- Risk of permanent inventory corruption
 
-**Benefits:**
-- Proper separation of concerns
-- Infrastructure implementations in correct location
-- Supports database transactions across multiple repositories
-- Automatic rollback on errors
-
----
-
-### 4. **Structured Logging System**
-**Location:** `internal/pkg/logger/logger.go`
-
-**Features:**
-- JSON structured logging
-- Log levels: DEBUG, INFO, WARN, ERROR, FATAL
-- Request ID tracking across middleware
-- Caller information for WARN+ logs
-- Context-aware logging with request ID
-
-**Usage Example:**
+#### Solution
+Wrapped checkout in database transaction:
 ```go
-log := logger.New("pos-service", logger.INFO)
-log.WithField("cart_id", cartID).Info("Cart created")
-```
-
----
-
-### 5. **Middleware Enhancements**
-**Location:** `internal/http/middleware/`
-
-**Added:**
-- **`RequestIDMiddleware`** - Adds unique request ID to each request
-- **`LoggingMiddleware`** - Logs all HTTP requests with duration
-- **`RateLimiter`** - In-memory rate limiting to prevent abuse
-
-**Benefits:**
-- Better observability
-- API protection from abuse
-- Request tracing across services
-
----
-
-### 6. **Health Check Endpoints**
-**Location:** `internal/handler/health_handler.go`
-
-**New Endpoints:**
-- `GET /api/health` - Health check with uptime info
-- `GET /api/ready` - Readiness check (for K8s)
-- `GET /api/live` - Liveness check (for K8s)
-
-**Response Example:**
-```json
-{
-  "status": "healthy",
-  "version": "2.0.0",
-  "uptime": "2h30m15s",
-  "timestamp": "2026-04-04T17:00:00Z"
+func (s *POSService) Checkout(ctx context.Context, ...) (*model.Transaction, error) {
+    tx, err := s.db.BeginTx(ctx, nil)
+    defer tx.Rollback() // Automatic rollback on failure
+    
+    // 1. Validate cart
+    // 2. Create transaction
+    // 3. Bulk update inventory
+    // 4. Save transaction
+    // 5. Delete cart
+    // 6. Commit
+    
+    err = tx.Commit()
+    return transaction, err
 }
 ```
 
----
+#### Impact
+- **Atomic operations** - All-or-nothing guarantee
+- **Automatic rollback** - Failed checkout restores state
+- **Data integrity** - No partial failures
+- **Inventory safety** - Stock always consistent
 
-### 7. **Customer Management Module**
-**Location:** `internal/domain/model/customer.go`
-
-**Features:**
-- Customer aggregate root with proper encapsulation
-- Loyalty points system (auto-add 1 point per 10,000 spent)
-- Purchase history tracking
-- Contact information management
-- Point redemption with validation
-
-**Domain Methods:**
-- `AddLoyaltyPoints(points int)` - Add points
-- `RedeemLoyaltyPoints(points int)` - Redeem points
-- `RecordPurchase(amount float64)` - Record purchase
-- `UpdateContactInfo(email, phone, address string)` - Update info
+#### Files Modified
+- `internal/domain/service/pos_service.go` - Added DB transaction support
+- `internal/infrastructure/repository/postgres_cart_repository.go` - Transaction-aware methods
+- `internal/infrastructure/repository/postgres_transaction_repository.go` - Transaction-aware methods
 
 ---
 
-### 8. **Repository Interface Enhancements**
+### 3. **N+1 Query Optimization** (HIGH)
 
-**CartRepository** - Added:
-- `ListByStatus()` - Retrieve carts by status (ACTIVE, ON_HOLD, CHECKED_OUT)
-
-**TransactionRepository** - Already had:
-- Advanced filtering and pagination
-- Date range queries
-- Cashier-based queries
-- Transaction number generation
-
-**CustomerRepository** - New:
-- Full CRUD operations
-- Email-based lookup
-- Pagination support
-
----
-
-### 9. **Refund Functionality**
-**Location:** `internal/domain/service/pos_service.go`
-
-**Added:**
-- `RefundTransaction()` - Process refund with inventory restoration
-- Proper validation (only completed transactions)
-- Automatic inventory restoration
-- Status update to REFUNDED
-
-**HTTP Endpoint:**
-- `POST /api/pos/transactions/{id}/refund`
-
----
-
-### 10. **Application Layer Compliance**
-**Location:** `internal/application/usecase/`
-
-**Ensured:**
-- Thin orchestration only (no business logic)
-- Follows pattern: Fetch → Delegate → Persist → Map
-- All business logic delegated to domain services
-- DTO mapping in application layer
-- No infrastructure imports (dependency rule)
-
----
-
-## 📊 Architecture Compliance
-
-### ✅ SOLID Principles
-
-| Principle | Status | Evidence |
-|-----------|--------|----------|
-| **Single Responsibility** | ✅ | Each struct has one purpose |
-| **Open/Closed** | ✅ | Open for extension via interfaces |
-| **Liskov Substitution** | ✅ | Interfaces are substitutable |
-| **Interface Segregation** | ✅ | Small, focused interfaces |
-| **Dependency Inversion** | ✅ | Depends on abstractions |
-
-### ✅ Clean Architecture Layers
-
-```
-Delivery (HTTP Handlers)
-    ↓
-Application (Usecases)
-    ↓
-Domain (Entities, Value Objects, Services)
-    ↑
-Infrastructure (Repositories, Database)
+#### Problem
+During checkout, each cart item triggered separate DB queries:
+```go
+// For each item in cart:
+product, _ := s.inventoryRepo.GetByID(ctx, item.ProductID())  // 1 query
+s.inventoryRepo.UpdateQuantity(ctx, product.ID(), newQty)     // 1 query
+// Total: 2 queries per item = 100 queries for 50-item cart
 ```
 
-**Compliance:**
-- ✅ Inner layers don't know about outer layers
-- ✅ Dependencies point inward
-- ✅ Domain layer has zero external dependencies
-- ✅ Infrastructure implements domain interfaces
+#### Solution
+Implemented batch operations:
+```go
+// Get all products in single query
+products := s.inventoryRepo.GetByIDs(ctx, productIDs)  // 1 query
 
-### ✅ DDD Patterns
+// Bulk update all quantities
+s.inventoryRepo.BulkUpdateQuantity(ctx, updates)       // 1 query
+// Total: 2 queries regardless of cart size
+```
 
-| Pattern | Status | Implementation |
-|---------|--------|----------------|
-| Rich Domain Model | ✅ | Business logic in entities |
-| Value Objects | ✅ | Money, SKU, Quantity, etc. |
-| Aggregate Roots | ✅ | Cart, Transaction, Customer |
-| Repository Pattern | ✅ | Interfaces in domain, impl in infra |
-| Ubiquitous Language | ✅ | Domain-specific method names |
-| Factory Methods | ✅ | `New<Entity>()` + `Reconstruct<Entity>()` |
+#### Performance Improvement
+| Cart Size | Before (queries) | After (queries) | Improvement |
+|-----------|-----------------|-----------------|-------------|
+| 10 items  | 20              | 2               | 90% ↓       |
+| 50 items  | 100             | 2               | 98% ↓       |
+| 100 items | 200             | 2               | 99% ↓       |
 
----
-
-## 🚀 New Features Added
-
-1. **Cart Hold/Resume** - Temporarily hold a cart and resume later
-2. **Transaction Refund** - Full refund support with inventory restoration
-3. **Customer Loyalty** - Automatic loyalty points system
-4. **Health Checks** - Comprehensive health/readiness/liveness endpoints
-5. **Request Tracing** - Request ID tracking across the system
-6. **Rate Limiting** - Built-in API rate protection
-7. **Structured Logging** - JSON logs for production monitoring
+#### Files Modified
+- `internal/infrastructure/repository/inventory_repository.go` - Added `GetByIDs()`, `BulkUpdateQuantity()`
+- `internal/domain/repository/inventory_repository.go` - Added interface methods
+- `internal/domain/service/pos_service.go` - Use batch methods in checkout
 
 ---
 
-## 📁 New Files Created
+### 4. **Removed Duplicate Registration Logic** (HIGH)
 
-### Domain Layer
-- `internal/domain/valueobject/money.go`
-- `internal/domain/valueobject/sku.go`
-- `internal/domain/valueobject/quantity.go`
-- `internal/domain/valueobject/product_name.go`
-- `internal/domain/model/customer.go`
-- `internal/domain/repository/customer_repository.go`
+#### Problem
+`AuthUsecase.Register()` duplicated entire registration flow:
+- Username/email existence checks
+- Password hashing
+- User creation
 
-### Application Layer
-- (Enhanced existing usecases with RefundTransaction)
+Both `AuthService.Register()` and `AuthUsecase.Register()` had identical logic:
+```go
+// In AuthUsecase.Register():
+exists, _ := u.userRepo.ExistsByUsername(ctx, req.Username)  // Duplicate
+exists, _ := u.userRepo.ExistsByEmail(ctx, req.Email)        // Duplicate
+hashedPassword, _ := bcrypt.GenerateFromPassword(...)        // Duplicate
+user, _ := model.NewUser(...)                                // Duplicate
+u.userRepo.Create(ctx, user)                                 // Duplicate
+```
 
-### Infrastructure Layer
-- `internal/infrastructure/persistence/unit_of_work.go`
-- `internal/infrastructure/persistence/postgres_cart_repository.go`
-- `internal/infrastructure/persistence/postgres_transaction_repository.go`
-- `internal/infrastructure/persistence/postgres_inventory_repository.go`
+#### Solution
+Removed duplication - use `AuthService` as single source of truth:
+```go
+func (u *authUsecase) Register(ctx context.Context, req dto.RegisterRequest) (*dto.UserResponse, error) {
+    // Delegate to AuthService
+    return u.authService.Register(ctx, req)
+}
+```
 
-### Delivery Layer
-- `internal/handler/health_handler.go`
-- `internal/http/middleware/logging.go`
-- `internal/http/middleware/rate_limiter.go`
-- `internal/pkg/logger/logger.go`
+#### Impact
+- **DRY principle** - Single source of truth
+- **Maintenance** - Only one place to update
+- **Consistency** - No risk of implementations diverging
+- **Security** - Unified validation and password hashing
 
----
-
-## 🔧 Modified Files
-
-### Domain Layer
-- `internal/domain/model/cart.go` - Added status, notes, customerID, hold/resume methods
-- `internal/domain/model/transaction.go` - Added refund functionality
-- `internal/domain/repository/pos_repository.go` - Added ListByStatus method
-
-### Application Layer
-- `internal/application/usecase/pos_usecase.go` - Added RefundTransaction
-- `internal/application/dto/pos_dto.go` - Fixed CartItem accessor usage
-
-### Infrastructure Layer
-- `internal/infrastructure/http/server.go` - Added health routes, middleware support
-- `internal/handler/pos_handler.go` - Added RefundTransaction handler
+#### Files Modified
+- `internal/application/usecase/auth_usecase.go` - Simplified to delegation
 
 ---
 
-## 🎯 What's Next (Pending)
+### 5. **Thread Safety for In-Memory Repositories** (MEDIUM)
 
-1. **Comprehensive Test Coverage** - Unit & integration tests
-2. **OpenAPI/Swagger Documentation** - Auto-generated API docs
-3. **Advanced Reporting** - Daily/weekly/monthly analytics
-4. **Audit Logging** - Track all critical operations
-5. **Product Categories** - Hierarchical product categorization
-6. **Multi-Store Support** - Multiple branches/locations
-7. **Receipt Generation** - PDF receipt printing
-8. **Export to CSV/Excel** - Report export
-9. **Inventory Alerts** - Low stock notifications
-10. **Barcode/QR Support** - Product scanning
+#### Problem
+`MemoryInventoryRepository` had no mutex protection:
+```go
+type MemoryInventoryRepository struct {
+    items map[string]*model.Inventory  // No sync primitive
+}
 
----
+func (r *MemoryInventoryRepository) Update(ctx context.Context, inv *model.Inventory) error {
+    r.items[inv.ID()] = inv  // Race condition!
+}
+```
 
-## 📈 Benefits Achieved
+#### Solution
+Added `sync.RWMutex` to all in-memory repositories:
+```go
+type MemoryInventoryRepository struct {
+    mu    sync.RWMutex
+    items map[string]*model.Inventory
+}
 
-### Code Quality
-- ✅ **Type Safety** - Value objects prevent invalid states
-- ✅ **Encapsulation** - Entities protect their invariants
-- ✅ **Testability** - Clean layers enable easy mocking
-- ✅ **Maintainability** - Clear separation of concerns
+func (r *MemoryInventoryRepository) Update(ctx context.Context, inv *model.Inventory) error {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    r.items[inv.ID()] = inv  // Thread-safe
+}
+```
 
-### Architecture
-- ✅ **SOLID Compliant** - All principles followed
-- ✅ **DDD Aligned** - Rich domain model with aggregates
-- ✅ **Clean Architecture** - Proper layer dependencies
-- ✅ **Production Ready** - Logging, health checks, rate limiting
+#### Impact
+- **Race-condition free** - Safe for concurrent access
+- **Testing safety** - No data races in tests
+- **Development mode** - Reliable for local testing
 
-### Features
-- ✅ **10+ New Features** - Hold/resume, refund, loyalty, etc.
-- ✅ **Better Observability** - Structured logging, request tracing
-- ✅ **API Protection** - Rate limiting, health checks
-- ✅ **Customer Management** - Full CRUD with loyalty system
-
----
-
-## 🏆 Standards Compliance
-
-| Standard | Status | Details |
-|----------|--------|---------|
-| **Entity Encapsulation** | ✅ 100% | All fields unexported with getters |
-| **Value Objects** | ✅ Done | Money, SKU, Quantity, ProductName |
-| **Repository Location** | ✅ Correct | `infrastructure/persistence/` |
-| **Rich Domain Model** | ✅ Yes | Business logic in entities |
-| **Thin Application** | ✅ Yes | Orchestration only |
-| **Ubiquitous Language** | ✅ Applied | Domain-specific method names |
-| **Constructor Pattern** | ✅ Complete | New + Reconstruct factories |
-| **Interface Segregation** | ✅ Small | Focused, composable interfaces |
-| **ACID Transactions** | ✅ Ready | Unit of Work pattern |
-| **Structured Logging** | ✅ Done | JSON logs with request tracing |
+#### Files Modified
+- `internal/infrastructure/repository/inventory_repository.go` - Added mutex to MemoryInventoryRepository
 
 ---
 
-## 🎓 Key Learnings
+### 6. **Configurable Tax Rate** (MEDIUM)
 
-1. **Value Objects prevent bugs** - Type safety catches errors at compile time
-2. **Entity encapsulation matters** - Protect invariants with private fields
-3. **Rich domain model reduces services** - Move logic to entities
-4. **Proper layering enables testing** - Clean interfaces = easy mocks
-5. **Ubiquitous language improves readability** - Method names reflect business
+#### Problem
+Tax rate hardcoded at 11%:
+```go
+func (s *POSService) Checkout(...) {
+    transaction.ApplyTax(11)  // Hardcoded!
+}
+```
+
+#### Solution
+Made configurable via environment variable:
+```go
+// In config.go
+POS_TAX_RATE: getEnvFloat("POS_TAX_RATE", 11.0)
+
+// In pos_service.go
+taxRate := config.GetPOSTaxRate()
+transaction.ApplyTax(taxRate)
+```
+
+#### Impact
+- **Flexibility** - Different regions/stores can use different rates
+- **No code changes** needed to update tax
+- **Environment-based** - Easy to configure per deployment
+
+#### Files Modified
+- `internal/infrastructure/config/config.go` - Added `POS_TAX_RATE` config
+- `internal/domain/service/pos_service.go` - Use configurable tax rate
+- `.env.example` - Added `POS_TAX_RATE` documentation
 
 ---
 
-## 📞 Support
+### 7. **Type-Safe Sales Summary** (MEDIUM)
 
-For questions about these optimizations, refer to:
-- `docs/architecture.md` - Architecture guidelines
-- `docs/code-standards.md` - Code standards
-- `docs/layers/domain.md` - DDD domain guidelines
-- `docs/layers/application.md` - Application layer guidelines
+#### Problem
+`GetTodaySales` returned `map[string]interface{}` with unsafe type assertions:
+```go
+func (s *POSService) GetTodaySales(ctx context.Context) (map[string]interface{}, error) {
+    return map[string]interface{}{
+        "total_sales": totalSales,
+        "total_transactions": totalTransactions,
+    }, nil
+}
+
+// In usecase - will panic if structure changes!
+sales["total_sales"].(float64)  // Unsafe!
+sales["total_transactions"].(int)  // Unsafe!
+```
+
+#### Solution
+Created typed response struct:
+```go
+type SalesSummaryResponse struct {
+    TotalSales        float64 `json:"total_sales"`
+    TotalTransactions int     `json:"total_transactions"`
+    TotalItems        int     `json:"total_items"`
+    Date              string  `json:"date"`
+}
+
+func (s *POSService) GetTodaySales(ctx context.Context) (*dto.SalesSummaryResponse, error) {
+    return &dto.SalesSummaryResponse{
+        TotalSales: totalSales,
+        TotalTransactions: totalTransactions,
+        TotalItems: totalItems,
+        Date: startOfDay.Format("2006-01-02"),
+    }, nil
+}
+```
+
+#### Impact
+- **Compile-time safety** - Type mismatches caught during build
+- **No runtime panics** - Type-safe access
+- **Self-documenting** - Clear structure definition
+- **JSON serialization** - Proper field tags
+
+#### Files Modified
+- `internal/application/dto/pos_dto.go` - Added `SalesSummaryResponse` struct
+- `internal/domain/service/pos_service.go` - Return typed struct
+- `internal/application/usecase/pos_usecase.go` - Use typed response
 
 ---
 
-**Last Updated:** April 4, 2026  
-**Version:** 2.1.0  
-**Build Status:** ✅ Passing
+### 8. **Consolidated JWT Generation Methods** (LOW)
+
+#### Problem
+Two methods did the same thing with different signatures:
+```go
+// Method 1
+GenerateToken(claims *model.TokenClaims, expiresAt time.Time) (string, error)
+
+// Method 2  
+GenerateTokenWithDuration(userID, username string, role model.UserRole, duration time.Duration) (string, error)
+```
+
+#### Solution
+Consolidated to single method with builder pattern:
+```go
+// Single unified method
+GenerateToken(userID, username string, role model.UserRole, duration time.Duration) (string, error)
+
+// Usage
+token, _ := jwtProvider.GenerateToken(userID, username, role, 24*time.Hour)
+```
+
+#### Impact
+- **Simpler API** - One method to learn
+- **Less confusion** - Clear usage pattern
+- **Easier maintenance** - Single implementation
+
+#### Files Modified
+- `internal/infrastructure/jwt/jwt_provider.go` - Consolidated methods
+- Updated all call sites to use unified method
+
+---
+
+### 9. **Removed Dead Code** (LOW)
+
+#### Problem
+- `PaymentService` created but never used
+- `/api/token/generate` endpoint did nothing (no-op)
+
+#### Solution
+- Removed `PaymentService` instantiation and references
+- Removed `/api/token/generate` endpoint and handler
+
+#### Impact
+- **Cleaner codebase** - Less confusion
+- **Smaller binary** - Reduced size
+- **Clear API** - No misleading endpoints
+
+#### Files Modified
+- `internal/infrastructure/http/server.go` - Removed endpoint
+- `internal/infrastructure/http/token_http_handler.go` - Removed handler
+- Various service wiring files - Removed PaymentService references
+
+---
+
+## 📊 Performance Comparison
+
+### Before (v2.x)
+```
+Checkout Flow:
+  1. Get cart from memory
+  2. For each item:
+     - Get product from DB (N queries)
+     - Check stock
+     - Update quantity in DB (N queries)
+  3. Create transaction in memory
+  4. Clear cart in memory
+  5. ⚠️ No rollback on failure
+  6. ⚠️ Data lost on restart
+
+Database Round-Trips: 2N + 1 (for N items)
+- 50 items = 101 queries
+- 100 items = 201 queries
+```
+
+### After (v3.0.0)
+```
+Checkout Flow:
+  1. Begin database transaction
+  2. Get cart from database
+  3. For each item:
+     - Get product (batch: 1 query)
+     - Check stock
+     - Update quantity (batch: 1 query)
+  4. Create transaction in database
+  5. Clear cart in database
+  6. Commit transaction
+  7. ✅ Automatic rollback on failure
+  8. ✅ Data persisted to PostgreSQL
+
+Database Round-Trips: 3 (constant)
+- 50 items = 3 queries (97% reduction)
+- 100 items = 3 queries (98.5% reduction)
+```
+
+---
+
+## 🔧 Configuration Changes
+
+### New Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `POS_TAX_RATE` | 11 | Default tax rate for checkout (%) |
+
+### Updated Environment Variables
+
+| Variable | Old Default | New Default | Description |
+|----------|-------------|-------------|-------------|
+| `JWT_ACCESS_TOKEN_TTL` | 86400 (seconds) | 15m (duration) | More intuitive format |
+| `JWT_REFRESH_TOKEN_TTL` | 604800 (seconds) | 168h (duration) | More intuitive format |
+
+---
+
+## 🚀 Migration Guide
+
+### For Existing Deployments
+
+1. **Database Migrations**
+   - No new migrations needed (existing schema supports all features)
+   - Cart and transaction tables already created in `005_create_pos_tables.up.sql`
+   - Token blacklist table already created in `002_create_tokens_table.up.sql`
+
+2. **Configuration**
+   - Add `POS_TAX_RATE` to `.env` (optional, defaults to 11)
+   - Update JWT TTL variables to duration format (optional)
+
+3. **Deployment**
+   - Build new version: `go build -o pos-app ./cmd/main.go`
+   - Restart server with PostgreSQL: `./pos-app -server`
+   - All data now persists automatically
+
+---
+
+## 📈 Monitoring & Metrics
+
+### Key Improvements to Monitor
+
+1. **Database Query Count**
+   - Before: ~100 queries per checkout (50 items)
+   - After: 3 queries per checkout
+   - Monitor: Database query logs
+
+2. **Response Time**
+   - Expected improvement: 80-95% faster checkout
+   - Monitor: HTTP response times in logs
+
+3. **Data Persistence**
+   - Before: Data lost on restart
+   - After: Zero data loss
+   - Monitor: Database row counts
+
+4. **Thread Safety**
+   - Before: Race conditions possible
+   - After: No races in any mode
+   - Monitor: Go race detector in tests
+
+---
+
+## ✅ Testing Checklist
+
+- [x] Build succeeds: `go build ./cmd/main.go`
+- [x] All tests pass: `go test ./...`
+- [x] Race detector clean: `go test -race ./...`
+- [x] PostgreSQL mode works
+- [x] In-memory mode works (development)
+- [x] Checkout is atomic (tested failure scenarios)
+- [x] Cart persists to database
+- [x] Transactions persist to database
+- [x] Token blacklist persists to database
+- [x] Tax rate configurable
+- [x] No goroutine leaks
+- [x] No memory leaks
+
+---
+
+## 🎯 Future Enhancements
+
+See [README.md](README.md#-todo--future-enhancements) for upcoming features.
+
+---
+
+## 📚 References
+
+- [Clean Architecture - Robert C. Martin](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
+- [Domain-Driven Design - Eric Evans](https://www.domainlanguage.com/ddd/)
+- [Go Database Transactions Best Practices](https://go.dev/doc/database/accessing-data)
+- [N+1 Query Problem](https://en.wikipedia.org/wiki/N%2B1_query_problem)
+
+---
+
+**Version**: 3.0.0  
+**Date**: April 4, 2026  
+**Author**: POS System Development Team

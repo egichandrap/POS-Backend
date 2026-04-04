@@ -67,7 +67,7 @@ func (s *ReceiptService) formatReceiptHeader() string {
 }
 
 func (s *ReceiptService) formatStoreInfo() string {
-	return fmt.Sprintf("%s\n%s\nTelp: %s\nKode: %s",
+	return fmt.Sprintf("%s\nTelp: %s\nKode: %s",
 		s.storeAddress,
 		s.storePhone,
 		s.storeCode,
