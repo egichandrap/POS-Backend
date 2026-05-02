@@ -67,9 +67,22 @@ func setupRoutes(
 	authMiddleware *httpmiddleware.AuthMiddleware,
 ) {
 	// Apply security middleware globally
+	r.Use(httpmiddleware.CORSMiddleware(httpmiddleware.CORSConfig{
+		AllowedOrigins:   []string{"*"}, // Allow all origins for development
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Request-ID", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"X-Request-ID"},
+		AllowCredentials: false, // Set to false when using "*" origin
+		MaxAge:           3600,
+	}))
 	r.Use(httpmiddleware.SecurityHeadersMiddleware)
 	r.Use(httpmiddleware.ValidationMiddleware)
 	r.Use(httpmiddleware.MaxBodySizeMiddleware(httpmiddleware.DefaultMaxBodySize))
+
+	// Handle OPTIONS for ALL /api/* routes (CORS preflight) - must be before specific routes
+	r.HandleFunc("/api/{path:.*}", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}).Methods(http.MethodOptions)
 
 	// Public routes (no authentication required)
 	publicRouter := r.PathPrefix("/api").Subrouter()
@@ -82,7 +95,7 @@ func setupRoutes(
 	publicRouter.HandleFunc("/token/refresh", tokenHTTPHandler.RefreshToken).Methods(http.MethodPost)
 	publicRouter.HandleFunc("/token/validate", tokenHTTPHandler.ValidateToken).Methods(http.MethodPost)
 	publicRouter.HandleFunc("/token/revoke", tokenHTTPHandler.RevokeToken).Methods(http.MethodPost)
-	
+
 	// Health check routes (no security headers needed)
 	r.HandleFunc("/api/health", healthHandler.HealthCheck).Methods(http.MethodGet)
 	r.HandleFunc("/api/ready", healthHandler.Ready).Methods(http.MethodGet)

@@ -1,6 +1,8 @@
 package http
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -15,7 +17,6 @@ type CORSConfig struct {
 	MaxAge           int
 }
 
-// DefaultCORSConfig returns secure default CORS config
 func DefaultCORSConfig() CORSConfig {
 	return CORSConfig{
 		AllowedOrigins:   []string{}, // Empty = deny all by default
@@ -34,10 +35,14 @@ func CORSMiddleware(config CORSConfig) func(http.Handler) http.Handler {
 		config.AllowedOrigins[i] = strings.ToLower(origin)
 	}
 
+	log.Printf("[CORS] Middleware initialized with allowed origins: %v", config.AllowedOrigins)
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
 			originLower := strings.ToLower(origin)
+
+			log.Printf("[CORS] Request: %s %s, Origin: %q", r.Method, r.URL.Path, origin)
 
 			// Check if origin is allowed
 			allowed := false
@@ -50,6 +55,7 @@ func CORSMiddleware(config CORSConfig) func(http.Handler) http.Handler {
 
 			// If origin not in allowed list, deny request
 			if origin != "" && !allowed {
+				log.Printf("[CORS] Origin NOT allowed: %q", origin)
 				http.Error(w, "CORS: Origin not allowed", http.StatusForbidden)
 				return
 			}
@@ -57,6 +63,14 @@ func CORSMiddleware(config CORSConfig) func(http.Handler) http.Handler {
 			// Set CORS headers
 			if origin != "" {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
+			} else {
+				// If no Origin header but "*" is allowed, set wildcard
+				for _, allowedOrigin := range config.AllowedOrigins {
+					if allowedOrigin == "*" {
+						w.Header().Set("Access-Control-Allow-Origin", "*")
+						break
+					}
+				}
 			}
 
 			if config.AllowCredentials {
@@ -66,10 +80,13 @@ func CORSMiddleware(config CORSConfig) func(http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Methods", strings.Join(config.AllowedMethods, ","))
 			w.Header().Set("Access-Control-Allow-Headers", strings.Join(config.AllowedHeaders, ","))
 			w.Header().Set("Access-Control-Expose-Headers", strings.Join(config.ExposedHeaders, ","))
-			w.Header().Set("Access-Control-Max-Age", string(rune(config.MaxAge)))
+			w.Header().Set("Access-Control-Max-Age", fmt.Sprintf("%d", config.MaxAge))
+
+			log.Printf("[CORS] Headers set, Allow-Origin: %q", w.Header().Get("Access-Control-Allow-Origin"))
 
 			// Handle preflight
 			if r.Method == "OPTIONS" {
+				log.Printf("[CORS] Preflight request, returning 204")
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}

@@ -16,7 +16,15 @@ func MaxBodySizeMiddleware(maxBytes int64) func(http.Handler) http.Handler {
 	}
 
 	return func(next http.Handler) http.Handler {
-		return http.MaxBytesHandler(next, maxBytes)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip body size check for OPTIONS requests (CORS preflight)
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Use MaxBytesHandler for other requests
+			http.MaxBytesHandler(next, maxBytes).ServeHTTP(w, r)
+		})
 	}
 }
 
@@ -27,5 +35,15 @@ func StrictMaxBodyMiddleware() func(http.Handler) http.Handler {
 
 // LoginMaxBodyMiddleware for login endpoint (10KB)
 func LoginMaxBodyMiddleware() func(http.Handler) http.Handler {
-	return MaxBodySizeMiddleware(10 << 10) // 10KB
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip body size check for OPTIONS requests (CORS preflight)
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Use MaxBytesHandler for other requests
+			http.MaxBytesHandler(next, 10<<10).ServeHTTP(w, r)
+		})
+	}
 }

@@ -12,47 +12,60 @@ import (
 // List of standard HTTP headers that should skip validation
 // These are headers automatically added by clients/browsers and are safe
 var safeHeaders = map[string]bool{
-	"user-agent":       true,
-	"accept":           true,
-	"accept-encoding":  true,
-	"accept-language":  true,
-	"connection":       true,
-	"content-length":   true,
-	"content-type":     true,
-	"authorization":    true,
-	"host":             true,
-	"referer":          true,
-	"cache-control":    true,
-	"postman-token":    true,
-	"x-forwarded-for":  true,
-	"x-forwarded-host": true,
+	"user-agent":        true,
+	"accept":            true,
+	"accept-encoding":   true,
+	"accept-language":   true,
+	"connection":        true,
+	"content-length":    true,
+	"content-type":      true,
+	"authorization":     true,
+	"host":              true,
+	"referer":           true,
+	"origin":            true,
+	"cache-control":     true,
+	"postman-token":     true,
+	"x-forwarded-for":   true,
+	"x-forwarded-host":  true,
 	"x-forwarded-proto": true,
-	"x-request-id":     true,
-	"x-request-start":  true,
+	"x-request-id":      true,
+	"x-request-start":   true,
+	// Browser security headers (Fetch Metadata, Client Hints, etc.)
+	"sec-ch-ua":                 true,
+	"sec-ch-ua-mobile":          true,
+	"sec-ch-ua-platform":        true,
+	"sec-fetch-dest":            true,
+	"sec-fetch-mode":            true,
+	"sec-fetch-site":            true,
+	"sec-fetch-user":            true,
+	"sec-gpc":                   true,
+	"dnt":                       true,
+	"upgrade-insecure-requests": true,
+	"pragma":                    true,
 }
 
 // List of standard query parameter names that are safe
 var safeQueryParams = map[string]bool{
-	"limit":      true,
-	"offset":     true,
-	"page":       true,
-	"size":       true,
-	"sort":       true,
-	"order":      true,
-	"search":     true,
-	"query":      true,
-	"filter":     true,
-	"status":     true,
-	"role":       true,
-	"type":       true,
-	"from":       true,
-	"to":         true,
-	"date":       true,
-	"start_date": true,
-	"end_date":   true,
-	"sku":        true,
-	"name":       true,
-	"location":   true,
+	"limit":          true,
+	"offset":         true,
+	"page":           true,
+	"size":           true,
+	"sort":           true,
+	"order":          true,
+	"search":         true,
+	"query":          true,
+	"filter":         true,
+	"status":         true,
+	"role":           true,
+	"type":           true,
+	"from":           true,
+	"to":             true,
+	"date":           true,
+	"start_date":     true,
+	"end_date":       true,
+	"sku":            true,
+	"name":           true,
+	"location":       true,
 	"payment_method": true,
 }
 
@@ -78,6 +91,12 @@ func isValidParamName(param string) bool {
 // ValidationMiddleware validates incoming requests
 func ValidationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip validation for OPTIONS preflight requests (CORS)
+		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// Validate URL path
 		if !sanitizer.ValidatePathTraversal(r.URL.Path) {
 			sendValidationError(w, "Invalid URL path")
