@@ -3,6 +3,8 @@ package model
 import (
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Inventory represents a warehouse inventory item entity
@@ -60,6 +62,7 @@ func NewInventory(
 
 	now := time.Now()
 	return &Inventory{
+		id:          uuid.New().String(),
 		sku:         sku,
 		name:        name,
 		description: description,

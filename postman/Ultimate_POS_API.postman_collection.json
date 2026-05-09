@@ -1,9 +1,9 @@
 {
 	"info": {
-		"name": "Ultimate POS System API",
-		"description": "Complete Postman Collection for Ultimate POS System - Fixed routes without double prefix",
+		"name": "Ultimate POS System API - Multi-Tenant",
+		"description": "Complete Postman Collection for Ultimate POS System with Multi-Tenant Support",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-		"version": "3.2.0"
+		"version": "4.0.0"
 	},
 	"variable": [
 		{
@@ -55,6 +55,21 @@
 			"key": "table_id",
 			"value": "",
 			"type": "string"
+		},
+		{
+			"key": "tenant_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "raw_material_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "recipe_id",
+			"value": "",
+			"type": "string"
 		}
 	],
 	"item": [
@@ -100,25 +115,71 @@
 						}
 					},
 					"response": []
-				},
+				}
+			]
+		},
+		{
+			"name": "2. Public - Tenant & Subscription",
+			"item": [
 				{
-					"name": "API Info",
+					"name": "Get Subscription Plans",
 					"request": {
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/",
+							"raw": "{{base_url}}/api/subscriptions/plans",
 							"host": ["{{base_url}}"],
-							"path": [""]
+							"path": ["api", "subscriptions", "plans"]
 						},
-						"description": "Get API information and available endpoints"
+						"description": "Get all available subscription plans (Plus, Pro, Enterprise)"
+					},
+					"response": []
+				},
+				{
+					"name": "Register Tenant",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set('tenant_id', jsonData.data.id);",
+									"}",
+									"pm.test('Status code is 200 or 201', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"company_name\": \"Warung Kopi Sukses\",\n  \"company_slug\": \"warung-kopi-sukses\",\n  \"domain\": \"warungkopi.example.com\",\n  \"email\": \"admin@warungkopi.com\",\n  \"phone\": \"08123456789\",\n  \"address\": \"Jl. Sudirman No. 123, Jakarta\",\n  \"subscription_plan_id\": \"plus\",\n  \"admin_user\": {\n    \"username\": \"adminwarung\",\n    \"email\": \"admin@warungkopi.com\",\n    \"password\": \"Admin123!\",\n    \"full_name\": \"Admin Warung\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/tenants/register",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tenants", "register"]
+						},
+						"description": "Register a new tenant/company with admin user"
 					},
 					"response": []
 				}
 			]
 		},
 		{
-			"name": "2. Public - Authentication",
+			"name": "3. Public - Authentication",
 			"item": [
 				{
 					"name": "Login (Super Admin)",
@@ -240,29 +301,6 @@
 					"response": []
 				},
 				{
-					"name": "Register",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"username\": \"newuser\",\n  \"email\": \"newuser@example.com\",\n  \"password\": \"password123\",\n  \"full_name\": \"New User\",\n  \"role\": \"CASHIER\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/auth/register",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "register"]
-						}
-					},
-					"response": []
-				},
-				{
 					"name": "Refresh Token",
 					"request": {
 						"method": "POST",
@@ -288,123 +326,10 @@
 			]
 		},
 		{
-			"name": "3. Public - Token Management",
+			"name": "4. Protected - Tenant Management (Admin)",
 			"item": [
 				{
-					"name": "Generate Token",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"var jsonData = pm.response.json();",
-									"if (jsonData.data && jsonData.data.access_token) {",
-									"    pm.collectionVariables.set('access_token', jsonData.data.access_token);",
-									"    pm.collectionVariables.set('refresh_token', jsonData.data.refresh_token);",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"username\": \"superadmin\",\n  \"password\": \"admin123\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/token/generate",
-							"host": ["{{base_url}}"],
-							"path": ["api", "token", "generate"]
-						},
-						"description": "Generate new JWT tokens (alternative to login)"
-					},
-					"response": []
-				},
-				{
-					"name": "Refresh Token (Alt)",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/token/refresh",
-							"host": ["{{base_url}}"],
-							"path": ["api", "token", "refresh"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Validate Token",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"access_token\": \"{{access_token}}\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/token/validate",
-							"host": ["{{base_url}}"],
-							"path": ["api", "token", "validate"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Revoke Token",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/token/revoke",
-							"host": ["{{base_url}}"],
-							"path": ["api", "token", "revoke"]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "4. Protected - Auth Profile",
-			"item": [
-				{
-					"name": "Get Current User (Me)",
+					"name": "List All Tenants",
 					"request": {
 						"method": "GET",
 						"header": [
@@ -415,80 +340,9 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/auth/me",
+							"raw": "{{base_url}}/api/tenants?limit=20&offset=0",
 							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "me"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Logout",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{access_token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/auth/logout",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "logout"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Change Password",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{access_token}}",
-								"type": "text"
-							},
-							{
-								"key": "Content-Type",
-								"value": "application/json",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"old_password\": \"admin123\",\n  \"new_password\": \"newpass123\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/auth/change-password",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "change-password"]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "5. Protected - Admin Users",
-			"item": [
-				{
-					"name": "List Users",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{access_token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/admin/users?limit=20&offset=0",
-							"host": ["{{base_url}}"],
-							"path": ["api", "admin", "users"],
+							"path": ["api", "tenants"],
 							"query": [
 								{
 									"key": "limit",
@@ -499,12 +353,12 @@
 									"value": "0"
 								},
 								{
-									"key": "role",
+									"key": "status",
 									"value": "",
 									"disabled": true
 								},
 								{
-									"key": "status",
+									"key": "plan",
 									"value": "",
 									"disabled": true
 								},
@@ -514,40 +368,13 @@
 									"disabled": true
 								}
 							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Create User",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{access_token}}",
-								"type": "text"
-							},
-							{
-								"key": "Content-Type",
-								"value": "application/json",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"username\": \"newcashier\",\n  \"email\": \"newcashier@example.com\",\n  \"password\": \"cashier123\",\n  \"full_name\": \"New Cashier\",\n  \"role\": \"CASHIER\"\n}"
 						},
-						"url": {
-							"raw": "{{base_url}}/api/admin/users",
-							"host": ["{{base_url}}"],
-							"path": ["api", "admin", "users"]
-						}
+						"description": "List all tenants (Super Admin only)"
 					},
 					"response": []
 				},
 				{
-					"name": "Get User by ID",
+					"name": "Get Tenant by ID",
 					"request": {
 						"method": "GET",
 						"header": [
@@ -558,15 +385,34 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/admin/users/{{user_id}}",
+							"raw": "{{base_url}}/api/tenants/{{tenant_id}}",
 							"host": ["{{base_url}}"],
-							"path": ["api", "admin", "users", "{{user_id}}"]
+							"path": ["api", "tenants", "{{tenant_id}}"]
 						}
 					},
 					"response": []
 				},
 				{
-					"name": "Update User",
+					"name": "Get Tenant by Slug",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/tenants/slug/warung-kopi-sukses",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tenants", "slug", "warung-kopi-sukses"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Tenant",
 					"request": {
 						"method": "PUT",
 						"header": [
@@ -583,18 +429,371 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"email\": \"updated@example.com\",\n  \"full_name\": \"Updated Name\",\n  \"status\": \"ACTIVE\"\n}"
+							"raw": "{\n  \"company_name\": \"Warung Kopi Sukses Updated\",\n  \"email\": \"updated@warungkopi.com\",\n  \"phone\": \"08129876543\",\n  \"address\": \"Jl. Sudirman No. 456, Jakarta\"\n}"
 						},
 						"url": {
-							"raw": "{{base_url}}/api/admin/users/{{user_id}}",
+							"raw": "{{base_url}}/api/tenants/{{tenant_id}}",
 							"host": ["{{base_url}}"],
-							"path": ["api", "admin", "users", "{{user_id}}"]
+							"path": ["api", "tenants", "{{tenant_id}}"]
 						}
 					},
 					"response": []
 				},
 				{
-					"name": "Delete User",
+					"name": "Update Tenant Settings",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"settings\": {\n    \"currency\": \"IDR\",\n    \"timezone\": \"Asia/Jakarta\",\n    \"receipt_footer\": \"Thank you for visiting!\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/tenants/{{tenant_id}}/settings",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tenants", "{{tenant_id}}", "settings"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Activate Tenant",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/tenants/{{tenant_id}}/activate",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tenants", "{{tenant_id}}", "activate"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Deactivate Tenant",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/tenants/{{tenant_id}}/deactivate",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tenants", "{{tenant_id}}", "deactivate"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "5. Protected - Subscription Management",
+			"item": [
+				{
+					"name": "Get Subscription Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/tenants/{{tenant_id}}/subscription",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tenants", "{{tenant_id}}", "subscription"]
+						},
+						"description": "Get current subscription status and usage"
+					},
+					"response": []
+				},
+				{
+					"name": "Upgrade/Downgrade Subscription",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"plan_id\": \"pro\",\n  \"duration\": \"monthly\",\n  \"payment_method\": \"transfer\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/tenants/{{tenant_id}}/subscription/upgrade",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tenants", "{{tenant_id}}", "subscription", "upgrade"]
+						},
+						"description": "Upgrade or downgrade subscription plan"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Subscription",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/tenants/{{tenant_id}}/subscription/cancel",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tenants", "{{tenant_id}}", "subscription", "cancel"]
+						},
+						"description": "Cancel subscription"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "6. Protected - Raw Materials",
+			"item": [
+				{
+					"name": "Create Raw Material",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set('raw_material_id', jsonData.data.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"sku\": \"RM-001\",\n  \"name\": \"Espresso Beans\",\n  \"description\": \"Premium espresso beans 1kg\",\n  \"unit\": \"kg\",\n  \"quantity\": 50,\n  \"min_stock\": 10,\n  \"cost_per_unit\": 150000,\n  \"supplier\": \"Coffee Supplier Inc\",\n  \"location\": \"Storage Room A\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/raw-materials",
+							"host": ["{{base_url}}"],
+							"path": ["api", "raw-materials"]
+						},
+						"description": "Create a new raw material/ingredient"
+					},
+					"response": []
+				},
+				{
+					"name": "List Raw Materials",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/raw-materials?limit=20&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["api", "raw-materials"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								},
+								{
+									"key": "search",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "supplier",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "low_stock",
+									"value": "false",
+									"disabled": true
+								},
+								{
+									"key": "out_of_stock",
+									"value": "false",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Raw Material by ID",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/raw-materials/{{raw_material_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "raw-materials", "{{raw_material_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Raw Material",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Espresso Beans Premium\",\n  \"description\": \"Premium espresso beans 1kg - Updated\",\n  \"unit\": \"kg\",\n  \"min_stock\": 15,\n  \"cost_per_unit\": 175000,\n  \"supplier\": \"New Coffee Supplier\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/raw-materials/{{raw_material_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "raw-materials", "{{raw_material_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Adjust Raw Material Stock",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity\": 10,\n  \"reason\": \"Restock from supplier\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/raw-materials/{{raw_material_id}}/stock/adjust",
+							"host": ["{{base_url}}"],
+							"path": ["api", "raw-materials", "{{raw_material_id}}", "stock", "adjust"]
+						},
+						"description": "Add or reduce stock (positive to add, negative to reduce)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Low Stock Materials",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/raw-materials/low-stock",
+							"host": ["{{base_url}}"],
+							"path": ["api", "raw-materials", "low-stock"]
+						},
+						"description": "Get all materials with low stock"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Out of Stock Materials",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/raw-materials/out-of-stock",
+							"host": ["{{base_url}}"],
+							"path": ["api", "raw-materials", "out-of-stock"]
+						},
+						"description": "Get all materials that are out of stock"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Raw Material",
 					"request": {
 						"method": "DELETE",
 						"header": [
@@ -605,9 +804,9 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/admin/users/{{user_id}}",
+							"raw": "{{base_url}}/api/raw-materials/{{raw_material_id}}",
 							"host": ["{{base_url}}"],
-							"path": ["api", "admin", "users", "{{user_id}}"]
+							"path": ["api", "raw-materials", "{{raw_material_id}}"]
 						}
 					},
 					"response": []
@@ -615,7 +814,216 @@
 			]
 		},
 		{
-			"name": "6. Protected - Inventory",
+			"name": "7. Protected - Product Recipes",
+			"item": [
+				{
+					"name": "Create Product Recipe",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"inventory_id\": \"{{inventory_id}}\",\n  \"raw_material_id\": \"{{raw_material_id}}\",\n  \"quantity_required\": 2\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/inventory/{{inventory_id}}/recipes",
+							"host": ["{{base_url}}"],
+							"path": ["api", "inventory", "{{inventory_id}}", "recipes"]
+						},
+						"description": "Add a raw material to a product recipe"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set('recipe_id', jsonData.data.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				},
+				{
+					"name": "Get Product Recipes",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/inventory/{{inventory_id}}/recipes",
+							"host": ["{{base_url}}"],
+							"path": ["api", "inventory", "{{inventory_id}}", "recipes"]
+						},
+						"description": "Get all recipes for a product"
+					},
+					"response": []
+				},
+				{
+					"name": "Set Product Recipes (Batch)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"recipes\": [\n    {\n      \"raw_material_id\": \"{{raw_material_id}}\",\n      \"quantity_required\": 2\n    },\n    {\n      \"raw_material_id\": \"{{raw_material_id}}\",\n      \"quantity_required\": 1\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/inventory/{{inventory_id}}/recipes/set",
+							"host": ["{{base_url}}"],
+							"path": ["api", "inventory", "{{inventory_id}}", "recipes", "set"]
+						},
+						"description": "Replace all recipes for a product"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Product Recipe",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity_required\": 3\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/recipes/{{recipe_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "recipes", "{{recipe_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Product Recipe",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/recipes/{{recipe_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "recipes", "{{recipe_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Product Recipes (All)",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/inventory/{{inventory_id}}/recipes/delete",
+							"host": ["{{base_url}}"],
+							"path": ["api", "inventory", "{{inventory_id}}", "recipes", "delete"]
+						},
+						"description": "Delete all recipes for a product"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "8. Protected - Product Availability",
+			"item": [
+				{
+					"name": "Get Product Availability",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/inventory/{{inventory_id}}/availability",
+							"host": ["{{base_url}}"],
+							"path": ["api", "inventory", "{{inventory_id}}", "availability"]
+						},
+						"description": "Check if product can be made based on raw material stock"
+					},
+					"response": []
+				},
+				{
+					"name": "Check Can Produce",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/inventory/{{inventory_id}}/can-produce",
+							"host": ["{{base_url}}"],
+							"path": ["api", "inventory", "{{inventory_id}}", "can-produce"]
+						},
+						"description": "Check if product can produce specified quantity"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "9. Protected - Inventory",
 			"item": [
 				{
 					"name": "List Inventory",
@@ -823,7 +1231,150 @@
 			]
 		},
 		{
-			"name": "7. Protected - POS Cart",
+			"name": "10. Protected - Admin Users",
+			"item": [
+				{
+					"name": "List Users",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/users?limit=20&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["api", "admin", "users"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								},
+								{
+									"key": "role",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "status",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "search",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"newcashier\",\n  \"email\": \"newcashier@example.com\",\n  \"password\": \"cashier123\",\n  \"full_name\": \"New Cashier\",\n  \"role\": \"CASHIER\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/admin/users",
+							"host": ["{{base_url}}"],
+							"path": ["api", "admin", "users"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User by ID",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "admin", "users", "{{user_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update User",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"updated@example.com\",\n  \"full_name\": \"Updated Name\",\n  \"status\": \"ACTIVE\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/admin/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "admin", "users", "{{user_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete User",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "admin", "users", "{{user_id}}"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "11. Protected - POS Cart",
 			"item": [
 				{
 					"name": "Create Cart",
@@ -1030,7 +1581,7 @@
 			]
 		},
 		{
-			"name": "8. Protected - POS Checkout & Transactions",
+			"name": "12. Protected - POS Checkout & Transactions",
 			"item": [
 				{
 					"name": "Checkout",
@@ -1197,7 +1748,7 @@
 			]
 		},
 		{
-			"name": "9. Public - Guest Orders",
+			"name": "13. Public - Guest Orders",
 			"item": [
 				{
 					"name": "Create Guest Order",
@@ -1347,7 +1898,7 @@
 			]
 		},
 		{
-			"name": "10. Protected - Orders Management",
+			"name": "14. Protected - Orders Management",
 			"item": [
 				{
 					"name": "List Orders",
@@ -1509,7 +2060,7 @@
 			]
 		},
 		{
-			"name": "11. Protected - Admin Tables",
+			"name": "15. Protected - Admin Tables",
 			"item": [
 				{
 					"name": "List Tables",
@@ -1727,7 +2278,7 @@
 			]
 		},
 		{
-			"name": "12. Protected - Admin Reports",
+			"name": "16. Protected - Admin Reports",
 			"item": [
 				{
 					"name": "Today's Sales Report",

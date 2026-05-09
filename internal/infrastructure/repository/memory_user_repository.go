@@ -43,6 +43,7 @@ func (r *MemoryUserRepository) seedDefaultUsers() {
 	// Super Admin
 	superAdmin := model.ReconstructUser(
 		uuid.New().String(),
+		"", // No tenant for super admin
 		"superadmin",
 		email1,
 		hashedPassword,
@@ -56,6 +57,7 @@ func (r *MemoryUserRepository) seedDefaultUsers() {
 	// Admin
 	admin := model.ReconstructUser(
 		uuid.New().String(),
+		"", // No tenant for default admin
 		"admin",
 		email2,
 		hashedPassword,
@@ -69,6 +71,7 @@ func (r *MemoryUserRepository) seedDefaultUsers() {
 	// Cashier
 	cashier := model.ReconstructUser(
 		uuid.New().String(),
+		"", // No tenant for default cashier
 		"cashier",
 		email3,
 		hashedPassword,

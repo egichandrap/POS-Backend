@@ -28,6 +28,16 @@
 			"key": "inventoryId",
 			"value": "",
 			"type": "string"
+		},
+		{
+			"key": "tenantId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "rawMaterialId",
+			"value": "",
+			"type": "string"
 		}
 	],
 	"item": [
@@ -44,6 +54,218 @@
 				"description": "Get API service information and available endpoints"
 			},
 			"response": []
+		},
+		{
+			"name": "0. Multi-Tenant & Subscription",
+			"item": [
+				{
+					"name": "Get Subscription Plans",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/subscriptions/plans",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "subscriptions", "plans"]
+						},
+						"description": "Get all available subscription plans (Plus, Pro, Enterprise)"
+					},
+					"response": []
+				},
+				{
+					"name": "Register Tenant",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set('tenantId', jsonData.data.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"company_name\": \"Test Cafe\",\n  \"company_slug\": \"test-cafe\",\n  \"domain\": \"testcafe.example.com\",\n  \"email\": \"admin@testcafe.com\",\n  \"phone\": \"08123456789\",\n  \"address\": \"Jl. Test No. 123\",\n  \"subscription_plan_id\": \"plus\",\n  \"admin_user\": {\n    \"username\": \"testadmin\",\n    \"email\": \"admin@testcafe.com\",\n    \"password\": \"Admin123!\",\n    \"full_name\": \"Test Admin\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/tenants/register",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "tenants", "register"]
+						},
+						"description": "Register a new tenant/company with admin user"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Tenant by ID",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/tenants/{{tenantId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "tenants", "{{tenantId}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Raw Material",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set('rawMaterialId', jsonData.data.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"sku\": \"RM-COFFEE-001\",\n  \"name\": \"Coffee Beans\",\n  \"description\": \"Premium Arabica coffee beans\",\n  \"unit\": \"kg\",\n  \"quantity\": 50,\n  \"min_stock\": 10,\n  \"cost_per_unit\": 150000,\n  \"supplier\": \"Coffee Supplier\",\n  \"location\": \"Storage Room A\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/raw-materials",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "raw-materials"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "List Raw Materials",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/raw-materials?limit=20&offset=0",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "raw-materials"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Adjust Raw Material Stock",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity\": 10,\n  \"reason\": \"Restock\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/raw-materials/{{rawMaterialId}}/stock/adjust",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "raw-materials", "{{rawMaterialId}}", "stock", "adjust"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Product Recipe",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"inventory_id\": \"{{inventoryId}}\",\n  \"raw_material_id\": \"{{rawMaterialId}}\",\n  \"quantity_required\": 0.018\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/product-recipes",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "product-recipes"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Check Product Availability",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/products/{{inventoryId}}/availability",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "products", "{{inventoryId}}", "availability"]
+						}
+					},
+					"response": []
+				}
+			]
 		},
 		{
 			"name": "1. Authentication",

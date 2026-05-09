@@ -63,8 +63,10 @@ func setupRoutes(
 	posHandler *handler.POSHandler,
 	tableHandler *handler.TableHandler,
 	guestOrderHandler *handler.GuestOrderHandler,
+	tenantHandler *handler.TenantHandler,
 	healthHandler *handler.HealthHandler,
 	authMiddleware *httpmiddleware.AuthMiddleware,
+	tenantMiddleware *httpmiddleware.TenantMiddleware,
 ) {
 	// Apply security middleware globally
 	r.Use(httpmiddleware.CORSMiddleware(httpmiddleware.CORSConfig{
@@ -101,14 +103,63 @@ func setupRoutes(
 	r.HandleFunc("/api/ready", healthHandler.Ready).Methods(http.MethodGet)
 	r.HandleFunc("/api/live", healthHandler.Live).Methods(http.MethodGet)
 
-	// Protected routes (authentication required)
+	// ============================================
+	// TENANT PUBLIC ROUTES (no authentication required)
+	// ============================================
+	// Reuse the existing publicRouter from above
+
+	// Subscription plans (public)
+	publicRouter.HandleFunc("/subscriptions/plans", tenantHandler.GetSubscriptionPlans).Methods(http.MethodGet)
+
+	// Tenant registration (public)
+	publicRouter.HandleFunc("/tenants/register", tenantHandler.RegisterTenant).Methods(http.MethodPost)
+
+	// Get tenant by slug (public)
+	publicRouter.HandleFunc("/tenants/slug/{slug}", tenantHandler.GetTenantBySlug).Methods(http.MethodGet)
+
+	// ============================================
+	// PROTECTED ROUTES (authentication required)
+	// ============================================
 	protectedRouter := r.PathPrefix("/api").Subrouter()
 	protectedRouter.Use(authMiddleware.Authenticate)
+	protectedRouter.Use(tenantMiddleware.TenantFromUser) // Auto-extract tenant from authenticated user
 
-	// Auth routes (require authentication)
-	protectedRouter.HandleFunc("/auth/logout", authHandler.Logout).Methods(http.MethodPost)
-	protectedRouter.HandleFunc("/auth/me", authHandler.GetMe).Methods(http.MethodGet)
-	protectedRouter.HandleFunc("/auth/change-password", authHandler.ChangePassword).Methods(http.MethodPost)
+	// Tenant management routes
+	protectedRouter.HandleFunc("/tenant", tenantHandler.GetTenant).Methods(http.MethodGet)
+	protectedRouter.HandleFunc("/tenant", tenantHandler.UpdateTenant).Methods(http.MethodPut)
+	protectedRouter.HandleFunc("/tenant/settings", tenantHandler.UpdateTenantSettings).Methods(http.MethodPut)
+	protectedRouter.HandleFunc("/tenant/subscription", tenantHandler.GetSubscriptionStatus).Methods(http.MethodGet)
+	protectedRouter.HandleFunc("/tenant/subscription/upgrade", tenantHandler.UpgradeSubscription).Methods(http.MethodPost)
+	protectedRouter.HandleFunc("/tenant/subscription/cancel", tenantHandler.CancelSubscription).Methods(http.MethodPost)
+
+	// Raw Material routes
+	protectedRouter.HandleFunc("/raw-materials", tenantHandler.ListRawMaterials).Methods(http.MethodGet)
+	protectedRouter.HandleFunc("/raw-materials", tenantHandler.CreateRawMaterial).Methods(http.MethodPost)
+	protectedRouter.HandleFunc("/raw-materials/low-stock", tenantHandler.GetLowStockMaterials).Methods(http.MethodGet)
+	protectedRouter.HandleFunc("/raw-materials/out-of-stock", tenantHandler.GetOutOfStockMaterials).Methods(http.MethodGet)
+	protectedRouter.HandleFunc("/raw-materials/{id}", tenantHandler.GetRawMaterial).Methods(http.MethodGet)
+	protectedRouter.HandleFunc("/raw-materials/{id}", tenantHandler.UpdateRawMaterial).Methods(http.MethodPut)
+	protectedRouter.HandleFunc("/raw-materials/{id}", tenantHandler.DeleteRawMaterial).Methods(http.MethodDelete)
+	protectedRouter.HandleFunc("/raw-materials/{id}/stock", tenantHandler.AdjustRawMaterialStock).Methods(http.MethodPost)
+
+	// Product Recipe routes (using /inventory path)
+	protectedRouter.HandleFunc("/inventory/{inventoryId}/recipes", tenantHandler.GetProductRecipes).Methods(http.MethodGet)
+	protectedRouter.HandleFunc("/inventory/{inventoryId}/recipes", tenantHandler.CreateProductRecipe).Methods(http.MethodPost)
+	protectedRouter.HandleFunc("/inventory/{inventoryId}/recipes/set", tenantHandler.SetProductRecipes).Methods(http.MethodPost)
+	protectedRouter.HandleFunc("/inventory/{inventoryId}/recipes/delete", tenantHandler.DeleteProductRecipes).Methods(http.MethodDelete)
+	protectedRouter.HandleFunc("/inventory/{inventoryId}/availability", tenantHandler.GetProductAvailability).Methods(http.MethodGet)
+	protectedRouter.HandleFunc("/inventory/{inventoryId}/can-produce", tenantHandler.CheckCanProduce).Methods(http.MethodGet)
+
+	// Product Recipe routes (using /products path for backward compatibility)
+	protectedRouter.HandleFunc("/products/{inventoryId}/recipes", tenantHandler.GetProductRecipes).Methods(http.MethodGet)
+	protectedRouter.HandleFunc("/products/{inventoryId}/recipes", tenantHandler.SetProductRecipes).Methods(http.MethodPost)
+	protectedRouter.HandleFunc("/products/{inventoryId}/recipes/delete", tenantHandler.DeleteProductRecipes).Methods(http.MethodDelete)
+	protectedRouter.HandleFunc("/products/{inventoryId}/availability", tenantHandler.GetProductAvailability).Methods(http.MethodGet)
+	protectedRouter.HandleFunc("/products/{inventoryId}/can-produce", tenantHandler.CheckCanProduce).Methods(http.MethodGet)
+
+	// Individual recipe management
+	protectedRouter.HandleFunc("/recipes/{id}", tenantHandler.UpdateProductRecipe).Methods(http.MethodPut)
+	protectedRouter.HandleFunc("/recipes/{id}", tenantHandler.DeleteProductRecipe).Methods(http.MethodDelete)
 
 	// Admin routes (require admin role)
 	adminRouter := protectedRouter.PathPrefix("/admin").Subrouter()
@@ -119,6 +170,17 @@ func setupRoutes(
 	adminRouter.HandleFunc("/users/{id}", authHandler.GetUserByID).Methods(http.MethodGet)
 	adminRouter.HandleFunc("/users/{id}", authHandler.UpdateUser).Methods(http.MethodPut)
 	adminRouter.HandleFunc("/users/{id}", authHandler.DeleteUser).Methods(http.MethodDelete)
+
+	// Tenant admin routes (SUPER_ADMIN only)
+	superAdminRouter := protectedRouter.PathPrefix("/admin/tenants").Subrouter()
+	superAdminRouter.Use(authMiddleware.RequireRole("SUPER_ADMIN"))
+
+	superAdminRouter.HandleFunc("", tenantHandler.ListTenants).Methods(http.MethodGet)
+	superAdminRouter.HandleFunc("/{id}", tenantHandler.GetTenantByID).Methods(http.MethodGet)
+	superAdminRouter.HandleFunc("/{id}", tenantHandler.UpdateTenantByID).Methods(http.MethodPut)
+	superAdminRouter.HandleFunc("/{id}/settings", tenantHandler.UpdateTenantSettingsByID).Methods(http.MethodPut)
+	superAdminRouter.HandleFunc("/{id}/activate", tenantHandler.ActivateTenant).Methods(http.MethodPost)
+	superAdminRouter.HandleFunc("/{id}/deactivate", tenantHandler.DeactivateTenant).Methods(http.MethodPost)
 
 	// Inventory routes (require authentication, admin for write operations)
 	inventoryRouter := protectedRouter.PathPrefix("/inventory").Subrouter()
@@ -275,9 +337,14 @@ func buildApp(
 	transactionRepo repository.TransactionRepository,
 	tableRepo repository.TableRepository,
 	guestOrderRepo repository.GuestOrderRepository,
+	tenantRepo repository.TenantRepository,
+	planRepo repository.SubscriptionPlanRepository,
+	rawMaterialRepo repository.RawMaterialRepository,
+	recipeRepo repository.ProductRecipeRepository,
+	usageRepo repository.TenantUsageRepository,
 	jwtProvider *jwt.Provider,
 	accessTokenTTL, refreshTokenTTL time.Duration,
-) (*TokenHTTPHandler, *inventoryhttp.InventoryHTTPHandler, *handler.AuthHandler, *handler.POSHandler, *handler.TableHandler, *handler.GuestOrderHandler, *handler.HealthHandler, *httpmiddleware.AuthMiddleware) {
+) (*TokenHTTPHandler, *inventoryhttp.InventoryHTTPHandler, *handler.AuthHandler, *handler.POSHandler, *handler.TableHandler, *handler.GuestOrderHandler, *handler.TenantHandler, *handler.HealthHandler, *httpmiddleware.AuthMiddleware, *httpmiddleware.TenantMiddleware) {
 	// Domain layer - Services
 	tokenService := service.NewTokenService(
 		tokenRepo,
@@ -325,12 +392,17 @@ func buildApp(
 
 	guestOrderHandler := handler.NewGuestOrderHandler(guestOrderUsecase)
 
+	// Tenant usecase and handler
+	tenantUsecase := usecase.NewTenantUsecase(tenantRepo, planRepo, rawMaterialRepo, recipeRepo, usageRepo, userRepo)
+	tenantHandler := handler.NewTenantHandler(tenantUsecase)
+
 	healthHandler := handler.NewHealthHandler("3.0.0")
 
 	// Middleware (still uses domain token service for low-level validation)
 	authMiddleware := httpmiddleware.NewAuthMiddleware(tokenService)
+	tenantMiddleware := httpmiddleware.NewTenantMiddleware(tenantRepo)
 
-	return tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, tableHandler, guestOrderHandler, healthHandler, authMiddleware
+	return tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, tableHandler, guestOrderHandler, tenantHandler, healthHandler, authMiddleware, tenantMiddleware
 }
 
 // NewServer creates a new HTTP server with gorilla/mux
@@ -350,10 +422,16 @@ func NewServer(config ServerConfig) *Server {
 	var transactionRepo repository.TransactionRepository = infrarepo.NewMemoryTransactionRepository()
 	var tableRepo repository.TableRepository = infrarepo.NewMemoryTableRepository()
 	var guestOrderRepo repository.GuestOrderRepository = infrarepo.NewMemoryGuestOrderRepository()
+	var tenantRepo repository.TenantRepository = infrarepo.NewMemoryTenantRepository()
+	var planRepo repository.SubscriptionPlanRepository = infrarepo.NewMemorySubscriptionPlanRepository()
+	var rawMaterialRepo repository.RawMaterialRepository = infrarepo.NewMemoryRawMaterialRepository()
+	var recipeRepo repository.ProductRecipeRepository = infrarepo.NewMemoryProductRecipeRepository()
+	var usageRepo repository.TenantUsageRepository = infrarepo.NewMemoryTenantUsageRepository()
 
 	// Build application layers
-	tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, tableHandler, guestOrderHandler, healthHandler, authMiddleware := buildApp(
+	tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, tableHandler, guestOrderHandler, tenantHandler, healthHandler, authMiddleware, tenantMiddleware := buildApp(
 		tokenRepo, inventoryRepo, userRepo, cartRepo, transactionRepo, tableRepo, guestOrderRepo,
+		tenantRepo, planRepo, rawMaterialRepo, recipeRepo, usageRepo,
 		jwtProvider, config.AccessTokenTTL, config.RefreshTokenTTL,
 	)
 
@@ -361,7 +439,7 @@ func NewServer(config ServerConfig) *Server {
 	r := mux.NewRouter()
 
 	// Setup routes
-	setupRoutes(r, tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, tableHandler, guestOrderHandler, healthHandler, authMiddleware)
+	setupRoutes(r, tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, tableHandler, guestOrderHandler, tenantHandler, healthHandler, authMiddleware, tenantMiddleware)
 
 	server := &http.Server{
 		Addr:         config.Host + ":" + config.Port,
@@ -395,10 +473,16 @@ func NewServerWithDatabase(config ServerConfig, db *sql.DB) *Server {
 	var transactionRepo repository.TransactionRepository = infrarepo.NewPostgresTransactionRepository(db)
 	var tableRepo repository.TableRepository = infrarepo.NewPostgresTableRepository(db)
 	var guestOrderRepo repository.GuestOrderRepository = infrarepo.NewPostgresGuestOrderRepository(db)
+	var tenantRepo repository.TenantRepository = infrarepo.NewPostgresTenantRepository(db)
+	var planRepo repository.SubscriptionPlanRepository = infrarepo.NewPostgresSubscriptionPlanRepository(db)
+	var rawMaterialRepo repository.RawMaterialRepository = infrarepo.NewPostgresRawMaterialRepository(db)
+	var recipeRepo repository.ProductRecipeRepository = infrarepo.NewPostgresProductRecipeRepository(db)
+	var usageRepo repository.TenantUsageRepository = infrarepo.NewMemoryTenantUsageRepository() // TODO: Implement PostgreSQL usage repository
 
 	// Build application layers
-	tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, tableHandler, guestOrderHandler, healthHandler, authMiddleware := buildApp(
+	tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, tableHandler, guestOrderHandler, tenantHandler, healthHandler, authMiddleware, tenantMiddleware := buildApp(
 		tokenRepo, inventoryRepo, userRepo, cartRepo, transactionRepo, tableRepo, guestOrderRepo,
+		tenantRepo, planRepo, rawMaterialRepo, recipeRepo, usageRepo,
 		jwtProvider, config.AccessTokenTTL, config.RefreshTokenTTL,
 	)
 
@@ -406,7 +490,7 @@ func NewServerWithDatabase(config ServerConfig, db *sql.DB) *Server {
 	r := mux.NewRouter()
 
 	// Setup routes
-	setupRoutes(r, tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, tableHandler, guestOrderHandler, healthHandler, authMiddleware)
+	setupRoutes(r, tokenHTTPHandler, inventoryHTTPHandler, authHandler, posHandler, tableHandler, guestOrderHandler, tenantHandler, healthHandler, authMiddleware, tenantMiddleware)
 
 	server := &http.Server{
 		Addr:         config.Host + ":" + config.Port,

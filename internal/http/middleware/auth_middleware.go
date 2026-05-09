@@ -21,6 +21,10 @@ const (
 	UsernameKey contextKey = "username"
 	// UserRoleKey is the context key for user role
 	UserRoleKey contextKey = "user_role"
+	// TenantIDKey is the context key for tenant ID
+	TenantIDKey contextKey = "tenant_id"
+	// TenantSlugKey is the context key for tenant slug
+	TenantSlugKey contextKey = "tenant_slug"
 )
 
 // AuthMiddleware represents JWT authentication middleware

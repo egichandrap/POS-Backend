@@ -30,6 +30,7 @@ const (
 // User represents a user entity in the domain
 type User struct {
 	id           string
+	tenantID     string // Multi-tenant: user belongs to a tenant
 	username     string
 	passwordHash valueobject.Password
 	email        valueobject.Email
@@ -76,6 +77,7 @@ func NewUser(
 // ReconstructUser recreates a user entity from database (trusted data)
 func ReconstructUser(
 	id string,
+	tenantID string,
 	username string,
 	email valueobject.Email,
 	password valueobject.Password,
@@ -88,6 +90,7 @@ func ReconstructUser(
 ) *User {
 	return &User{
 		id:           id,
+		tenantID:     tenantID,
 		username:     username,
 		email:        email,
 		passwordHash: password,
@@ -105,6 +108,17 @@ func ReconstructUser(
 // ID returns the user ID
 func (u *User) ID() string {
 	return u.id
+}
+
+// TenantID returns the tenant ID
+func (u *User) TenantID() string {
+	return u.tenantID
+}
+
+// SetTenantID sets the tenant ID (used during user creation/update)
+func (u *User) SetTenantID(tenantID string) {
+	u.tenantID = tenantID
+	u.updatedAt = time.Now()
 }
 
 // Username returns the username

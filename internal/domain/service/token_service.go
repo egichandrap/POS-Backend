@@ -8,6 +8,7 @@ import (
 	apperrors "github.com/example/jwt-ddd-clean/internal/pkg/errors"
 	"github.com/example/jwt-ddd-clean/internal/domain/model"
 	"github.com/example/jwt-ddd-clean/internal/domain/repository"
+	"github.com/example/jwt-ddd-clean/internal/domain/valueobject"
 )
 
 // TokenService handles business logic for token operations
@@ -118,11 +119,16 @@ func (s *TokenService) RefreshToken(ctx context.Context, refreshToken string) (*
 	}
 
 	// Generate new token pair using reconstructed user
+	// Note: tenant_id will be empty here as we're reconstructing from JWT claims
+	// The actual tenant association should be fetched from the database if needed
+	email, _ := valueobject.NewEmail("") // Empty email for reconstructed user
+	password := valueobject.Password("") // Empty password for reconstructed user
 	reconstructedUser := model.ReconstructUser(
 		claims.UserID,
+		"", // tenant_id - empty since we're reconstructing from JWT
 		claims.Username,
-		"",
-		"",
+		email,
+		password,
 		"",
 		model.UserRole(claims.Role),
 		model.StatusActive,

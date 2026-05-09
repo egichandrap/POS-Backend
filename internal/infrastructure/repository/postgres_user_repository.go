@@ -23,13 +23,13 @@ func NewPostgresUserRepository(db *sql.DB) *PostgresUserRepository {
 }
 
 func scanUser(row *sql.Row) (*model.User, error) {
-	var id, username, passwordHash, emailStr, fullName string
+	var id, tenantID, username, passwordHash, emailStr, fullName string
 	var roleStr, statusStr string
 	var createdAt, updatedAt time.Time
 	var lastLoginAt sql.NullTime
 
 	err := row.Scan(
-		&id, &username, &passwordHash, &emailStr, &fullName,
+		&id, &tenantID, &username, &passwordHash, &emailStr, &fullName,
 		&roleStr, &statusStr, &createdAt, &updatedAt, &lastLoginAt,
 	)
 	if err != nil {
@@ -44,13 +44,13 @@ func scanUser(row *sql.Row) (*model.User, error) {
 	role := model.UserRole(roleStr)
 	status := model.UserStatus(statusStr)
 
-	user := model.ReconstructUser(id, username, email, password, fullName, role, status, createdAt, updatedAt, nil)
+	user := model.ReconstructUser(id, tenantID, username, email, password, fullName, role, status, createdAt, updatedAt, nil)
 
 	if lastLoginAt.Valid {
 		// Record login sets lastLoginAt - we need to set it manually
 		// Since we can't access private field, we use a different approach
 		// For now, just reconstruct with the lastLoginAt
-		user = model.ReconstructUser(id, username, email, password, fullName, role, status, createdAt, updatedAt, &lastLoginAt.Time)
+		user = model.ReconstructUser(id, tenantID, username, email, password, fullName, role, status, createdAt, updatedAt, &lastLoginAt.Time)
 	}
 
 	return user, nil
@@ -59,7 +59,7 @@ func scanUser(row *sql.Row) (*model.User, error) {
 // FindByID retrieves a user by their ID
 func (r *PostgresUserRepository) FindByID(ctx context.Context, id string) (*model.User, error) {
 	query := `
-		SELECT id, username, password_hash, email, full_name, role, status, created_at, updated_at, last_login_at
+		SELECT id, tenant_id, username, password_hash, email, full_name, role, status, created_at, updated_at, last_login_at
 		FROM users
 		WHERE id = $1
 	`
@@ -70,7 +70,7 @@ func (r *PostgresUserRepository) FindByID(ctx context.Context, id string) (*mode
 // FindByUsername retrieves a user by their username
 func (r *PostgresUserRepository) FindByUsername(ctx context.Context, username string) (*model.User, error) {
 	query := `
-		SELECT id, username, password_hash, email, full_name, role, status, created_at, updated_at, last_login_at
+		SELECT id, tenant_id, username, password_hash, email, full_name, role, status, created_at, updated_at, last_login_at
 		FROM users
 		WHERE username = $1
 	`
@@ -81,7 +81,7 @@ func (r *PostgresUserRepository) FindByUsername(ctx context.Context, username st
 // FindByEmail retrieves a user by their email
 func (r *PostgresUserRepository) FindByEmail(ctx context.Context, email string) (*model.User, error) {
 	query := `
-		SELECT id, username, password_hash, email, full_name, role, status, created_at, updated_at, last_login_at
+		SELECT id, tenant_id, username, password_hash, email, full_name, role, status, created_at, updated_at, last_login_at
 		FROM users
 		WHERE email = $1
 	`
@@ -92,12 +92,13 @@ func (r *PostgresUserRepository) FindByEmail(ctx context.Context, email string) 
 // Create creates a new user
 func (r *PostgresUserRepository) Create(ctx context.Context, user *model.User) error {
 	query := `
-		INSERT INTO users (id, username, password_hash, email, full_name, role, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO users (id, tenant_id, username, password_hash, email, full_name, role, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 
 	_, err := r.db.ExecContext(ctx, query,
 		user.ID(),
+		user.TenantID(),
 		user.Username(),
 		user.PasswordHash().String(),
 		user.Email().String(),
@@ -203,7 +204,7 @@ func (r *PostgresUserRepository) ListWithPagination(ctx context.Context, filter 
 
 	// Build query
 	query := `
-		SELECT id, username, password_hash, email, full_name, role, status, created_at, updated_at, last_login_at
+		SELECT id, tenant_id, username, password_hash, email, full_name, role, status, created_at, updated_at, last_login_at
 		FROM users
 		WHERE 1=1
 	`
@@ -269,13 +270,13 @@ func (r *PostgresUserRepository) ListWithPagination(ctx context.Context, filter 
 }
 
 func scanRows(rows *sql.Rows) (*model.User, error) {
-	var id, username, passwordHash, emailStr, fullName string
+	var id, tenantID, username, passwordHash, emailStr, fullName string
 	var roleStr, statusStr string
 	var createdAt, updatedAt time.Time
 	var lastLoginAt sql.NullTime
 
 	err := rows.Scan(
-		&id, &username, &passwordHash, &emailStr, &fullName,
+		&id, &tenantID, &username, &passwordHash, &emailStr, &fullName,
 		&roleStr, &statusStr, &createdAt, &updatedAt, &lastLoginAt,
 	)
 	if err != nil {
@@ -287,10 +288,10 @@ func scanRows(rows *sql.Rows) (*model.User, error) {
 	role := model.UserRole(roleStr)
 	status := model.UserStatus(statusStr)
 
-	user := model.ReconstructUser(id, username, email, password, fullName, role, status, createdAt, updatedAt, nil)
+	user := model.ReconstructUser(id, tenantID, username, email, password, fullName, role, status, createdAt, updatedAt, nil)
 
 	if lastLoginAt.Valid {
-		user = model.ReconstructUser(id, username, email, password, fullName, role, status, createdAt, updatedAt, &lastLoginAt.Time)
+		user = model.ReconstructUser(id, tenantID, username, email, password, fullName, role, status, createdAt, updatedAt, &lastLoginAt.Time)
 	}
 
 	return user, nil
